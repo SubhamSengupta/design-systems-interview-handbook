@@ -1,5 +1,7 @@
 # Design Systems Interview Handbook
 
+**Live:** [design-systems-interview-handbook.vercel.app](https://design-systems-interview-handbook.vercel.app/)
+
 A senior-level, first-principles handbook for Frontend Engineers interviewing
 with Design Systems teams — design tokens, component architecture,
 accessibility, styling architecture, tooling (Storybook, monorepos,
@@ -37,10 +39,13 @@ tone) is documented in [`CONTENT_GUIDE.md`](./CONTENT_GUIDE.md).
 
 ## Deploying
 
-This app is a standard Next.js App Router project — deploy it on
-[Vercel](https://vercel.com/new) by importing this repository. No
-environment variables are required. Vercel will run `npm run build`
-(the Webpack-pinned build script) automatically.
+Deployed on Vercel at
+[design-systems-interview-handbook.vercel.app](https://design-systems-interview-handbook.vercel.app/),
+tracking the `main` branch of this repository. This app is a standard
+Next.js App Router project — to deploy your own copy, import this
+repository at [Vercel](https://vercel.com/new). No environment variables
+are required; Vercel runs `npm run build` (the Webpack-pinned build
+script) automatically.
 
 ## Stack
 
