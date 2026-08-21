@@ -1,69 +1,116 @@
-import Image from "next/image";
+import Link from "next/link";
+import { CHAPTERS } from "@/lib/chapters";
+import { getAllChapterStats } from "@/lib/chapter-stats.server";
+import { SITE } from "@/lib/site";
+import { HomeProgressStrip } from "@/components/site/home-progress-strip";
 
 export default function Home() {
+  const stats = getAllChapterStats();
+  const totalMinutes = Object.values(stats).reduce((sum, s) => sum + s.minutes, 0);
+  const totalWords = Object.values(stats).reduce((sum, s) => sum + s.words, 0);
+
+  const parts = Array.from(new Set(CHAPTERS.map((c) => c.part)));
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <div className="mx-auto max-w-5xl px-4 py-14 sm:px-6 lg:px-8">
+      <section className="mb-16">
+        <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-violet-600 dark:text-violet-400">
+          Interview handbook
+        </p>
+        <h1 className="max-w-3xl text-4xl font-bold tracking-tight sm:text-5xl">
+          {SITE.name}
+        </h1>
+        <p className="mt-5 max-w-2xl text-lg leading-relaxed text-slate-600 dark:text-slate-300">
+          {SITE.description}
+        </p>
+
+        <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-500 dark:text-slate-400">
+          <span>{CHAPTERS.length} chapters</span>
+          <span aria-hidden>·</span>
+          <span>{totalWords > 0 ? `${(totalWords / 1000).toFixed(0)}k+ words` : "80k–120k words"}</span>
+          <span aria-hidden>·</span>
+          <span>{totalMinutes > 0 ? `~${Math.round(totalMinutes / 60)} hr read` : "long-form reference"}</span>
+        </div>
+
+        <div className="mt-8 flex flex-wrap gap-3">
+          <Link
+            href={`/chapters/${CHAPTERS[0].slug}`}
+            className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
+          >
+            Start with Chapter 1
+            <span aria-hidden>→</span>
+          </Link>
+          <Link
+            href="#chapters"
+            className="inline-flex items-center gap-2 rounded-lg border border-black/15 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-violet-400 hover:text-violet-700 dark:border-white/15 dark:text-slate-200 dark:hover:text-violet-300"
+          >
+            Browse all chapters
+          </Link>
+        </div>
+
+        <HomeProgressStrip />
+      </section>
+
+      <section className="mb-14 grid gap-4 sm:grid-cols-3">
+        <InfoCard
+          title="Who this is for"
+          body="Senior Frontend Engineers (7–10+ years) with strong React, TypeScript and architecture skills, interviewing with an Engineering Manager and a Design Systems team."
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+        <InfoCard
+          title="How to use it"
+          body="Read chapters in order the first time — later chapters (governance, case studies, manager prep) assume the vocabulary built in earlier ones. Come back and jump around before an interview."
+        />
+        <InfoCard
+          title="What's inside"
+          body="Every chapter follows the same template: first-principles definition, architecture diagrams, production-grade code, tradeoffs, common mistakes, and interview + manager-level Q&A."
+        />
+      </section>
+
+      <section id="chapters" className="scroll-mt-20">
+        <h2 className="mb-6 text-2xl font-bold tracking-tight">Chapters</h2>
+        <div className="space-y-10">
+          {parts.map((part) => (
+            <div key={part}>
+              <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                {part}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {CHAPTERS.filter((c) => c.part === part).map((chapter) => {
+                  const s = stats[chapter.slug];
+                  return (
+                    <Link
+                      key={chapter.slug}
+                      href={`/chapters/${chapter.slug}`}
+                      className="group rounded-xl border border-black/10 bg-white p-5 transition hover:border-violet-400/60 hover:shadow-md dark:border-white/10 dark:bg-white/[0.02] dark:hover:border-violet-400/40"
+                    >
+                      <div className="mb-2 flex items-start justify-between gap-3">
+                        <h3 className="font-semibold text-slate-900 group-hover:text-violet-700 dark:text-slate-100 dark:group-hover:text-violet-300">
+                          {chapter.title}
+                        </h3>
+                        {s.minutes > 0 && (
+                          <span className="shrink-0 whitespace-nowrap text-xs text-slate-400">{s.minutes} min</span>
+                        )}
+                      </div>
+                      <p className="text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+                        {chapter.description}
+                      </p>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </section>
+    </div>
+  );
+}
+
+function InfoCard({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-xl border border-black/10 bg-surface p-5 dark:border-white/10">
+      <h3 className="mb-2 text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</h3>
+      <p className="text-sm leading-relaxed text-slate-500 dark:text-slate-400">{body}</p>
     </div>
   );
 }
