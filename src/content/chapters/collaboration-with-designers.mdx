@@ -6,163 +6,205 @@ export const metadata = {
 
 # 12. Collaboration with Designers
 
+## Quick Glance
+
+- Collaboration with designers means keeping the Figma component and the code component representing one design decision — not two versions that quietly drift apart.
+- Default failure mode without deliberate practice: engineers eyeball spacing/color from a static Figma export instead of reading the real token value, and Figma variant properties get added with no matching code prop.
+- Figma Variables (released 2023) gave Figma a native token model with real modes (light/dark, brand A/B) — the same idea as a CSS custom property or Style Dictionary token, finally represented on the design side.
+- Design Review happens before implementation (catches missing edge cases: empty state, overflow, RTL, error state); Design QA happens after implementation (catches drift from the Figma spec).
+- Automated visual regression (Chromatic) does neither of those — it only compares a version to its own previous version, so it can't tell you if a component was ever right.
+- If asked what Chromatic doesn't catch: a component can be pixel-stable release-over-release while still being wrong relative to the actual Figma spec from day one — only Design QA catches that.
+- Token sync between Figma and code needs exactly one authoritative source with automated, one-way propagation — a manual "someone copies values over" step is where drift creeps back in.
+- Mirror Figma variant properties (Size, Emphasis) into TypeScript prop unions 1:1 where natural, but Figma "State" variants like hover/disabled should NOT become a prop — code handles those via actual interaction/CSS.
+- When pushing back on an expensive design request, always pair it with a concrete cost (bundle size, performance, accessibility, maintenance) and a cheaper alternative — never a bare "no" or a silent unannounced approximation.
+- Real examples to cite: Adobe Spectrum (tokens published as a versioned package consumed by both Figma libraries and code), Shopify Polaris (explicit usage guidance closes the shared-vocabulary gap).
+
 ## Definition
 
 **Collaboration with designers**, in a design system context, is the set
-of working practices, shared tools, and communication conventions that
-let design and engineering build the *same* component from two different
-disciplines without the two versions drifting apart — the Figma component
-and the code component need to represent one underlying design decision,
-not two independent interpretations of it that happen to look similar at
-first glance. This is a distinct discipline from general product
-design-engineering collaboration because a design system component isn't
-built once for one screen — it's built once and instantiated everywhere,
-which means any drift between the Figma source and the code source
-doesn't just cause one page to look slightly off, it compounds across
-every product surface that uses the component.
+of working practices, shared tools, and communication habits that let
+design and engineering build the *same* component — from two different
+disciplines — without the two versions drifting apart. The Figma
+component and the code component need to represent one underlying
+design decision, not two separate interpretations that just happen to
+look similar at first glance.
+
+This is a distinct discipline from general product design-engineering
+collaboration, because a design system component isn't built once for
+one screen. It's built once and used everywhere. Any drift between the
+Figma source and the code source doesn't just make one page look
+slightly off — it compounds across every product surface that uses the
+component.
 
 ## Problem Statement
 
-The default failure mode, without deliberate practice, is that Figma and
-code become two separate, slowly diverging sources of truth. A designer
-adjusts a component's padding in Figma; the engineering team doesn't know
-until a PM notices the shipped product doesn't match the latest mock. An
-engineer, under deadline pressure, eyeballs a spacing value from a static
-export instead of asking what the actual token value is, and ships 14px
-where the spec meant `--spacing-md` (which happens to render as 12px) —
-close enough to pass casual review, wrong enough to fail a pixel-level
-brand audit six months later when someone finally compares them side by
-side. Neither of these is a competence failure on either side; they're
-what happens by default when the design file and the codebase have no
-structural connection between them and depend entirely on humans
-noticing drift.
+Without deliberate practice, the default failure mode is that Figma and
+code become two separate sources of truth that slowly drift apart. A
+designer adjusts a component's padding in Figma. The engineering team
+doesn't find out until a PM notices the shipped product doesn't match
+the latest mock. Or: an engineer, under deadline pressure, eyeballs a
+spacing value from a static export instead of checking the actual token
+value, and ships `14px` where the spec meant `--spacing-md` (which
+actually renders as `12px`). That's close enough to pass a casual
+review, but wrong enough to fail a pixel-level brand audit six months
+later, once someone finally compares them side by side.
 
-The problem compounds because design and engineering also don't share a
+Neither of these is a competence failure on either side. They're just
+what happens by default when the design file and the codebase have no
+structural connection, and drift depends entirely on a human noticing
+it.
+
+The problem gets worse because design and engineering also don't share a
 vocabulary by default. A designer's mental model of "variant" in Figma
-(a specific configuration in a component set, defined by property
-combinations) and an engineer's mental model of "variant" in code (often
-a single prop like `variant="primary"` that may or may not map 1:1 to a
-Figma variant) are related but not identical concepts, and a conversation
-where both people say "variant" and mean slightly different things
-produces exactly the kind of miscommunication that looks, from the
-outside, like someone wasn't listening. Collaboration practice exists to
-close both gaps: the structural gap (no shared source of truth) and the
-vocabulary gap (no shared definitions), because either one alone is
-enough to produce a design system where the file and the product quietly
-stop matching.
+is a specific configuration in a component set, defined by a combination
+of properties. An engineer's mental model of "variant" in code is often
+just a single prop, like `variant="primary"`, that may or may not map
+cleanly onto a Figma variant. These are related concepts, but not
+identical ones. A conversation where both people say "variant" and mean
+slightly different things produces exactly the kind of miscommunication
+that looks, from the outside, like someone wasn't listening.
+
+Collaboration practice exists to close both gaps: the structural gap (no
+shared source of truth) and the vocabulary gap (no shared definitions).
+Either gap alone is enough to produce a design system where the file and
+the product quietly stop matching.
 
 ## Why Does This Exist?
 
-This discipline exists because a design system, uniquely among software
-artifacts, has two authors working from two different tools whose native
-data models don't line up perfectly. A product feature is typically
-designed once, in one file, and built once, in one PR — any
-miscommunication is local and gets caught fast because the same two
-people are looking at the same output almost immediately. A design
-system component is designed once but referenced by every future
-designer mocking up a new screen with it, and built once but imported by
-every future engineer building that screen — the gap between design
-intent and code reality, once introduced, gets baked into every future
-usage rather than surfaced and corrected quickly. That asymmetry is why
-mature design system orgs invest specifically in structural
-synchronization (token pipelines connecting Figma and code, not just
-"designers and engineers talk more") rather than treating this as a
-communication problem solvable purely with better meetings.
+This discipline exists because a design system, unlike most software
+artifacts, has two authors working from two different tools whose
+underlying data models don't line up perfectly.
+
+A typical product feature is designed once, in one file, and built
+once, in one PR. Any miscommunication is local, and it gets caught
+fast, because the same two people are looking at the same output almost
+right away.
+
+A design system component is different. It's designed once, but
+referenced by every future designer mocking up a new screen with it.
+It's built once, but imported by every future engineer building that
+screen. The gap between design intent and code reality, once it's
+introduced, gets baked into every future use of the component — it
+doesn't surface and get corrected quickly the way it would on a one-off
+feature.
+
+That's why mature design system orgs invest specifically in structural
+synchronization — token pipelines that connect Figma and code, not just
+"designers and engineers talk more." Treating this purely as a
+communication problem, solvable with better meetings, misses the actual
+structural cause.
 
 ## Historical Context
 
-Figma's component model itself — variants (introduced 2020, unifying what
-used to require separate top-level components for each state/size
-combination into a single component set) and auto-layout (also 2020,
-Figma's answer to CSS flexbox-like behavior inside the design tool) — are
-directly responsible for a large part of how modern design-engineering
-collaboration works, because they gave designers a way to build Figma
-components whose internal structure actually mirrors how a well-built
-code component behaves: one definition, multiple prop-driven states,
-content that reflows rather than needing manual resizing per instance.
-Before auto-layout, a Figma "component" was frequently a rigid, fixed-size
-frame that couldn't gracefully handle long text or a missing icon — which
-meant the code component's real-world flexibility (handling arbitrary
-content) had no design-file equivalent to review against, and edge cases
-were discovered in code review or, worse, in production, not in design
-review.
+Figma's component model itself is directly responsible for a lot of how
+modern design-engineering collaboration works today. Two features
+matter most: variants (introduced in 2020, which unified what used to
+require separate top-level components for each state/size combination
+into a single component set) and auto-layout (also 2020, Figma's answer
+to CSS flexbox-like behavior inside the design tool).
+
+These gave designers a way to build Figma components whose internal
+structure actually mirrors how a well-built code component behaves: one
+definition, multiple prop-driven states, content that reflows instead
+of needing manual resizing per instance. Before auto-layout, a Figma
+"component" was often a rigid, fixed-size frame that couldn't gracefully
+handle long text or a missing icon. That meant the code component's
+real-world flexibility — handling arbitrary content — had no
+design-file equivalent to check against. Edge cases got discovered in
+code review, or worse, in production, instead of in design review.
 
 Figma Variables, released in 2023, is the more recent and more directly
-relevant shift for design systems specifically: before Variables,
-Figma's "tokens" were simulated through styles (color styles, text
-styles) or through third-party plugins like Tokens Studio, which worked
-but sat outside Figma's native data model and required exporting/syncing
-through a plugin-specific JSON format. Variables gave Figma a native,
-first-class concept of a token with real modes (light/dark, brand A/brand
-B) that a design file can reference directly — the same fundamental
-concept as a CSS custom property or a Style Dictionary token, finally
-represented natively on the design side instead of simulated. This is
-the single biggest recent unlock for closing the structural gap described
-above, because it means the same *token identity* — not just the same
-visual value — can be referenced from both Figma and code, and a token
-value change in one authoritative source (however a team chooses to
-define that source) can propagate to both.
+relevant shift for design systems specifically. Before Variables,
+Figma's "tokens" were simulated — either through styles (color styles,
+text styles), or through third-party plugins like Tokens Studio. Those
+worked, but they sat outside Figma's native data model and needed
+exporting or syncing through a plugin-specific JSON format.
 
-Design QA and formal design review as codified practices trace to design
-systems maturing past their initial build-out phase — early-stage design
-systems typically don't have the component volume or consumer count to
-justify a formal pixel-review step; it becomes standard practice once a
+Variables gave Figma a native, first-class concept of a token, with real
+modes (light/dark, brand A/brand B) that a design file can reference
+directly. It's the same underlying idea as a CSS custom property or a
+Style Dictionary token — finally represented natively on the design
+side, instead of simulated. This is the single biggest recent unlock for
+closing the structural gap described above. It means the same *token
+identity* — not just the same visual value — can be referenced from both
+Figma and code. A token value change in one authoritative source
+(however a team chooses to define that source) can propagate to both.
+
+Design QA and formal design review as codified practices trace back to
+design systems maturing past their initial build-out phase. Early-stage
+design systems usually don't have enough components or consumers to
+justify a formal pixel-review step. It becomes standard practice once a
 system has enough components, and enough teams building on top of them,
-that undetected drift starts accumulating faster than ad hoc noticing can
-catch it. Visual regression tooling (Chromatic, covered in
-[Chapter 7](/chapters/storybook)) automated the *pixel-diff-against-
-previous-version* half of this problem starting in the mid-2010s, but
-deliberately does not automate the *pixel-diff-against-design-intent*
-half — which is exactly the gap formal Design QA fills, and why the two
-practices coexist rather than one making the other obsolete.
+that undetected drift starts piling up faster than ad hoc noticing can
+catch it.
+
+Visual regression tooling (Chromatic, covered in
+[Chapter 7](/chapters/storybook)) automated one half of this problem,
+starting in the mid-2010s: comparing a component's pixels against its
+own previous version. It deliberately does not automate the other half:
+comparing a component's pixels against actual design intent. That
+second half is exactly the gap formal Design QA fills — which is why
+the two practices coexist, rather than one making the other
+unnecessary.
 
 ## How It Works Internally
 
 The structural fix to the drift problem is making Figma and code
-*reference the same token identity*, not just visually resemble each
-other. Mechanically, this typically works through Figma's REST API or
-its plugin API: a Figma plugin (or a scheduled job hitting the REST API)
-reads the current values and modes of a file's Variables collection,
+*reference the same token identity*, not just look visually similar.
+
+Mechanically, this usually works through Figma's REST API or its plugin
+API. A Figma plugin (or a scheduled job hitting the REST API) reads the
+current values and modes of a file's Variables collection, and
 transforms that into the JSON shape a token pipeline like Style
 Dictionary consumes (see [Chapter 2](/chapters/design-tokens) for the
-Style Dictionary transform pipeline in depth), and that same generated
-JSON is what both the Figma file (via the Variables it was read from) and
+Style Dictionary transform pipeline in depth). That same generated JSON
+is what both the Figma file (via the Variables it was read from) and
 the codebase (via Style Dictionary's platform outputs — CSS custom
-properties, iOS, Android) ultimately derive from. Whether Figma or a
-separate token source-of-truth repository is the *authoritative* origin
-of a token value is a real architectural decision teams make
-differently — some treat Figma Variables as the source of truth and
-generate code tokens from an export; others treat a token JSON file in
-the codebase as authoritative and push values *into* Figma Variables via
-the API so designers see the same values engineering ships. Either
-direction works; what actually matters, and what breaks teams that skip
-this step, is that there is exactly *one* authoritative source and an
-automated, not manual, sync in one direction from it — a manual "someone
-copies values over" step is where drift creeps back in, since it depends
-on a human remembering to do it every time either side changes.
+properties, iOS, Android) ultimately derive from.
+
+Whether Figma or a separate token source-of-truth repository is the
+*authoritative* origin of a token value is a real architectural
+decision, and teams make it differently. Some treat Figma Variables as
+the source of truth and generate code tokens from an export. Others
+treat a token JSON file in the codebase as authoritative, and push
+values *into* Figma Variables via the API, so designers see the same
+values engineering ships. Either direction works. What actually matters
+— and what breaks teams that skip this step — is that there's exactly
+*one* authoritative source, and an automated (not manual) sync running
+one way from it. A manual "someone copies values over" step is where
+drift creeps back in, because it depends on a human remembering to do
+it every time either side changes.
 
 Design review and Design QA are, mechanically, two different checks
-happening at two different points in the pipeline, and conflating them is
-a common mistake. Design review happens *before* implementation, on the
-Figma file itself, and its job is catching problems the design doesn't
-yet have an answer for — an empty state nobody designed, an overflow
-behavior nobody specified for long text, no RTL mirroring consideration,
-no error state. Design QA happens *after* implementation, comparing the
-shipped (or about-to-ship, in a preview environment) component against
-the Figma spec, and its job is catching *implementation* drift — spacing
-that's off by a few pixels, a color token that resolved to the wrong
-value, an animation easing curve that doesn't match. Automated visual
-regression (Chromatic) catches a third, related but distinct thing:
-whether *this* version differs from the *previous* version, which says
-nothing about whether either version actually matches design intent — a
-component can be pixel-identical to its own last release and still be
-wrong relative to the Figma spec, if it was wrong in both releases. All
-three checks are necessary and none subsumes the others.
+happening at two different points in the pipeline. Conflating them is a
+common mistake.
+
+Design review happens *before* implementation, on the Figma file
+itself. Its job is catching problems the design doesn't yet have an
+answer for: an empty state nobody designed, an overflow behavior nobody
+specified for long text, no thought given to RTL mirroring, no error
+state.
+
+Design QA happens *after* implementation, comparing the shipped (or
+about-to-ship, in a preview environment) component against the Figma
+spec. Its job is catching *implementation* drift: spacing that's off by
+a few pixels, a color token that resolved to the wrong value, an
+animation easing curve that doesn't match.
+
+Automated visual regression (Chromatic) catches a third, related but
+different thing: whether *this* version differs from the *previous*
+version. That says nothing about whether either version actually
+matches design intent — a component can be pixel-identical to its own
+last release and still be wrong relative to the Figma spec, if it was
+already wrong in both releases.
+
+All three checks are necessary, and none of them can replace the
+others.
 
 ## Architecture
 
-The full pipeline connecting a token change at its source, through
-Figma, through code, to a Design-QA-verified shipped component:
+Here's the full pipeline — a token change moving from its source,
+through Figma, through code, to a Design-QA-verified shipped component:
 
 ```mermaid
 graph TD
@@ -181,43 +223,43 @@ graph TD
   J -->|Matches spec| K
 ```
 
-The two review arrows into implementation (`G` feeding `H`, and `J`
-looping back to `H`) represent the two points where design and
-engineering explicitly synchronize, rather than each discipline working
-from a stale snapshot of the other's intent.
+The two review arrows feeding into implementation — `G` into `H`, and
+`J` looping back to `H` — represent the two points where design and
+engineering explicitly synchronize, instead of each discipline working
+off a stale snapshot of the other's intent.
 
 ## Real-World Example
 
-Adobe Spectrum is a useful case study specifically because Adobe
-publishes tooling (the Spectrum design tokens repository, and Spectrum's
-own Figma libraries) that makes the token-sync architecture above
-concrete and inspectable rather than theoretical: Spectrum's design
-tokens are published as a versioned package that both the Figma libraries
-and the code implementations (React Spectrum, Spectrum CSS) consume,
-which is precisely the "one authoritative source, automated propagation
-to both" pattern this chapter describes, done at the scale of a company
-shipping products across Photoshop, Illustrator, XD-successor tooling,
-and various web products that all need to look coherently "Adobe" despite
-being built by largely separate teams.
+Adobe Spectrum is a useful case study, specifically because Adobe
+publishes real tooling — the Spectrum design tokens repository, and
+Spectrum's own Figma libraries — that makes the token-sync architecture
+above concrete and inspectable, rather than theoretical. Spectrum's
+design tokens are published as a versioned package that both the Figma
+libraries and the code implementations (React Spectrum, Spectrum CSS)
+consume. That's exactly the "one authoritative source, automated
+propagation to both" pattern this chapter describes, done at the scale
+of a company shipping products across Photoshop, Illustrator, and
+various web products, all of which need to look coherently "Adobe"
+despite being built by largely separate teams.
 
 Shopify's Polaris is a useful contrasting example for the vocabulary and
-process side of this chapter: Polaris publishes not just components but
-explicit content and UX writing guidelines alongside them, and Shopify's
-public design system documentation is unusually explicit about *why* a
-component looks the way it does (their documentation includes
-usage guidance — when to use a `Banner` vs a `Toast`, for instance — not
-just visual specs), which is a direct answer to the shared-vocabulary
-problem: rather than assuming design and engineering converge on the
-same understanding of when a component applies, Polaris writes it down
-so both disciplines, and anyone new joining either team, can look it up
-rather than re-deriving a shared understanding from scratch each time.
+process side of this chapter. Polaris publishes not just components,
+but explicit content and UX writing guidelines alongside them.
+Shopify's public design system documentation is unusually explicit about
+*why* a component looks the way it does — it includes usage guidance,
+like when to use a `Banner` versus a `Toast`, not just visual specs.
+That's a direct answer to the shared-vocabulary problem. Instead of
+assuming design and engineering will converge on the same understanding
+of when a component applies, Polaris writes it down, so both
+disciplines — and anyone new joining either team — can look it up
+instead of re-deriving a shared understanding from scratch every time.
 
 ## Implementation Example
 
-A Figma-to-code token sync script — this is the concrete mechanism behind
-the `D → E` and `A → D` arrows in the architecture diagram, reading a
-Figma file's Variables via the REST API and reconciling them against the
-codebase's token source of truth:
+Here's a Figma-to-code token sync script. This is the concrete mechanism
+behind the `D → E` and `A → D` arrows in the architecture diagram — it
+reads a Figma file's Variables via the REST API and reconciles them
+against the codebase's token source of truth:
 
 ```ts
 // scripts/sync-figma-variables.ts
@@ -321,12 +363,12 @@ main().catch((err) => {
 });
 ```
 
-A component API design that deliberately mirrors a Figma component's
-variant structure — this is the concrete practice referenced in
+Here's a component API design that deliberately mirrors a Figma
+component's variant structure. This is the concrete practice behind
 "understanding Figma's component model helps you build a matching code
 API": Figma variant properties become TypeScript prop unions 1:1, so a
-designer switching a Figma instance's variant property and an engineer
-setting the equivalent prop are describing the exact same underlying
+designer switching a Figma instance's variant property, and an engineer
+setting the equivalent prop, are describing the exact same underlying
 decision:
 
 ```tsx
@@ -371,56 +413,68 @@ export function Button({
 
 ## Advantages
 
-A structurally synced token pipeline eliminates the specific, recurring
-bug class of engineers eyeballing spacing/color values from a static
-image — the most common source of small, cumulative visual drift in
-design systems without one. A shared vocabulary (an explicit glossary
-mapping design terms to code terms, and a component API that mirrors the
-Figma variant structure) reduces the number of clarifying-question round
-trips a component build requires, which compounds meaningfully across
-dozens of components and a design system team's whole roadmap. Formal
-design review catches edge cases — empty states, overflow, RTL, error
-states — while they're still cheap to fix, in a design file, rather than
-after implementation when fixing them means a code change and a second
-round of review. Design QA catches a category of bug automated visual
-regression structurally cannot: a component that renders consistently
+A structurally synced token pipeline eliminates a specific, recurring
+bug: engineers eyeballing spacing or color values from a static image.
+That's the most common source of small, cumulative visual drift in
+design systems without one.
+
+A shared vocabulary — an explicit glossary mapping design terms to code
+terms, plus a component API that mirrors the Figma variant structure —
+cuts down the number of clarifying-question round trips a component
+build requires. That adds up meaningfully across dozens of components
+and a design system team's whole roadmap.
+
+Formal design review catches edge cases — empty states, overflow, RTL,
+error states — while they're still cheap to fix, in a design file,
+instead of after implementation, when fixing them means a code change
+plus a second round of review.
+
+Design QA catches a category of bug automated visual regression
+structurally can't: a component that renders consistently
 release-over-release (passing Chromatic) but was wrong relative to
 design intent from the start, and stays wrong until a human actually
-compares it against the spec. And a productive disagreement-resolution
-framework (data/cost framing instead of "no") preserves the working
-relationship between design and engineering, which matters because these
-two disciplines have to collaborate continuously, not just on one
-project.
+compares it against the spec.
+
+And a productive way to resolve disagreements — leading with data and
+cost instead of a bare "no" — protects the working relationship between
+design and engineering. That matters, because these two disciplines
+have to collaborate continuously, not just on one project.
 
 ## Disadvantages
 
-None of this is free, and the costs are worth being honest about. A
-Figma-to-code sync pipeline is itself a piece of infrastructure that can
-break, drift, or silently fail — an API sync script that's stopped
-running (an expired token, a changed file key) produces exactly the
+None of this is free, and it's worth being honest about the costs.
+
+A Figma-to-code sync pipeline is itself a piece of infrastructure that
+can break, drift, or silently fail. An API sync script that stopped
+running — an expired token, a changed file key — creates exactly the
 false confidence of "we have a sync, so we don't need to check for
-drift" while actually not syncing anything. Formal design review and
-Design QA both cost real calendar time — a design review step that adds
-a mandatory two-day turnaround before implementation can start is real
-latency, and Design QA as a manual pixel-comparison step doesn't scale
-linearly with component count without dedicated headcount for it.
+drift," while actually syncing nothing.
+
+Formal design review and Design QA both cost real calendar time. A
+design review step that adds a mandatory two-day turnaround before
+implementation can start is real latency. Design QA, as a manual
+pixel-comparison step, doesn't scale linearly with component count
+without dedicated headcount for it.
+
 Mirroring Figma's variant structure precisely in a component's prop API
 sometimes forces an API shape that isn't the most idiomatic code
-design — Figma's variant model and a well-designed TypeScript discriminated
-union don't always want to be the same shape, and prioritizing the
-Figma-mirroring instinct too rigidly can produce a slightly awkward code
-API in exchange for design/engineering vocabulary alignment. And building
-a shared glossary and communication practice is genuinely soft,
-ongoing work that doesn't show up as a shippable artifact — it's easy
-to deprioritize relative to component work with a visible, demoable
-output.
+design. Figma's variant model and a well-designed TypeScript
+discriminated union don't always want to be the same shape, and
+prioritizing the Figma-mirroring instinct too rigidly can produce a
+slightly awkward code API, in exchange for design/engineering
+vocabulary alignment.
+
+And building a shared glossary and communication practice is genuinely
+soft, ongoing work that doesn't show up as a shippable artifact. It's
+easy to deprioritize relative to component work with a visible,
+demoable output.
 
 ## Alternatives
 
-Rather than tools competing head to head, the real "alternatives" in this
-space are workflow strategies for the token-sync problem specifically —
-worth comparing because teams genuinely choose differently here based on
-org size and tooling maturity.
+Rather than tools competing head to head, the real "alternatives" here
+are workflow strategies for the token-sync problem specifically. They're
+worth comparing, because teams genuinely choose differently depending
+on org size and tooling maturity.
 
 | Dimension | Manual handoff (static export + spec doc) | Figma Variables + automated code sync | Third-party plugin (Tokens Studio) as intermediary |
 | --- | --- | --- | --- |
@@ -436,86 +490,98 @@ org size and tooling maturity.
 | When NOT to choose it | Any design system expecting more than a handful of components or consumers | Rarely a wrong choice today, given Variables' maturity | Adds a dependency and config surface not worth it if native Variables alone covers your mode/brand complexity |
 
 Large, mature design system organizations converge on **Figma Variables
-with an automated code sync** as the default today, specifically because
-it eliminates the single largest source of manual, error-prone
-re-entry of the same values in two places — Adobe's Spectrum, as
-discussed above, is a public example of a company operating at this
-level of integration. Manual handoff persists at early-stage systems and
-smaller teams purely because it requires zero upfront tooling
-investment, but it is a strategy that predictably breaks down as
-component count and consumer count grow — it isn't that manual handoff
-is a bad choice at small scale, it's that teams frequently fail to
-recognize the point at which they've outgrown it, and keep accepting
-drift as normal until a brand audit or new hire notices how far apart
-the file and the product have drifted. Third-party plugins like Tokens
-Studio remain the right choice specifically for organizations with token
-complexity that exceeds what Figma's native Variables modes handle
-cleanly — very large multi-brand portfolios with many simultaneous theme
-combinations — but for the common case of light/dark plus one or two
-brands, native Variables alone is now sufficient and removes a
-third-party dependency from the pipeline.
+with an automated code sync** as the default today. It eliminates the
+single largest source of manual, error-prone re-entry of the same
+values in two places. Adobe's Spectrum, discussed above, is a public
+example of a company operating at this level of integration.
+
+Manual handoff persists at early-stage systems and smaller teams, purely
+because it needs zero upfront tooling investment. But it's a strategy
+that predictably breaks down as component count and consumer count
+grow. Manual handoff isn't a bad choice at small scale — the problem is
+that teams often fail to notice the point where they've outgrown it,
+and keep accepting drift as normal until a brand audit or a new hire
+finally notices how far apart the file and the product have drifted.
+
+Third-party plugins like Tokens Studio remain the right choice
+specifically for organizations whose token complexity exceeds what
+Figma's native Variables modes handle cleanly — very large multi-brand
+portfolios with many simultaneous theme combinations. But for the
+common case of light/dark plus one or two brands, native Variables alone
+is now enough, and it removes a third-party dependency from the
+pipeline.
 
 ## Tradeoffs
 
-Every investment in this chapter trades upfront tooling/process cost
-against downstream drift risk, and the right amount of investment scales
-with design system maturity, not with team size alone. A token sync
-pipeline costs real engineering time to build and maintain, but the
-alternative cost — a brand audit six months later discovering a dozen
-subtly wrong color values shipped because someone eyeballed a static
-Figma export — is diffuse, delayed, and easy to underestimate until it's
-discovered. Formal design review adds calendar time before implementation
-starts, in exchange for catching edge cases (empty/overflow/RTL/error
-states) while they're still a design-file conversation rather than a
-code change plus a second review cycle — the tradeoff generally favors
-review specifically because the components under review get *reused*
-across the whole org, multiplying the cost of an uncaught edge case far
-beyond what it would be for a one-off feature. Mirroring Figma's variant
-structure in a component's prop API trades some code-API idiomaticity for
-design/engineering vocabulary alignment — usually worth it, but a
-senior engineer should recognize the specific cases (a Figma variant
-combination that doesn't actually correspond to a meaningfully distinct
-code behavior) where forcing the mirror produces an awkward, over-specific
-API and push back on those specific cases rather than treating the
-mirroring instinct as absolute.
+Every investment in this chapter trades upfront tooling and process cost
+against downstream drift risk. The right amount of investment scales
+with design system maturity, not just team size.
+
+A token sync pipeline costs real engineering time to build and
+maintain. But the alternative cost — a brand audit six months later,
+discovering a dozen subtly wrong color values shipped because someone
+eyeballed a static Figma export — is diffuse, delayed, and easy to
+underestimate until it's actually discovered.
+
+Formal design review adds calendar time before implementation starts.
+In exchange, it catches edge cases (empty/overflow/RTL/error states)
+while they're still a design-file conversation, rather than a code
+change plus a second review cycle. This tradeoff generally favors
+review, specifically because the components under review get *reused*
+across the whole org — multiplying the cost of an uncaught edge case
+far beyond what it would be for a one-off feature.
+
+Mirroring Figma's variant structure in a component's prop API trades
+some code-API idiomaticity for design/engineering vocabulary alignment.
+This is usually worth it, but a senior engineer should recognize the
+specific cases where forcing the mirror produces an awkward,
+over-specific API — a Figma variant combination that doesn't actually
+correspond to a meaningfully distinct code behavior — and push back on
+those cases, instead of treating the mirroring instinct as absolute.
 
 ## Performance Considerations
 
-"Performance" in this chapter's context isn't runtime performance — it's
-process throughput: how much design-to-shipped-component latency the
-collaboration model introduces, and how much of that latency is
-irreducible communication cost versus avoidable process friction. A
-design system team should track review cycle time the same way they'd
-track a build pipeline's duration — a design review step that reliably
-adds two weeks of back-and-forth per component is a signal the review
-process itself needs tightening (a clearer checklist of what's being
-reviewed for, rather than open-ended feedback rounds), not necessarily
-that the practice itself is wrong. Automated token sync removes what
-was previously a fully manual, per-release re-entry step (an engineer
-comparing hex values by eye), which is the single highest-leverage
-process-performance improvement available in this space — it converts an
-O(number of tokens × number of releases) manual task into a scheduled
-job that runs the same in constant human time regardless of token count.
+"Performance" in this chapter isn't runtime performance — it's process
+throughput. That means: how much design-to-shipped-component latency
+the collaboration model introduces, and how much of that latency is
+unavoidable communication cost versus avoidable process friction.
+
+A design system team should track review cycle time the same way they'd
+track how long a build pipeline takes. A design review step that
+reliably adds two weeks of back-and-forth per component is a signal the
+review process itself needs tightening — a clearer checklist of what's
+being reviewed for, instead of open-ended feedback rounds — not
+necessarily that the practice itself is wrong.
+
+Automated token sync removes what used to be a fully manual, per-release
+re-entry step: an engineer comparing hex values by eye. This is the
+single highest-leverage process-performance improvement available in
+this space. It turns a task that used to scale with both the number of
+tokens and the number of releases into a scheduled job that runs in
+roughly constant human time, no matter how many tokens there are.
 
 ## Scalability Considerations
 
-Manual handoff, and even ad hoc design review without a checklist, both
+Manual handoff, and even ad hoc design review with no checklist, both
 work fine at a handful of components with one designer and one engineer
-in the same room. Neither survives, unchanged, past the point where a
-design system has multiple designers contributing to the same Figma
-library and multiple engineers implementing from it — at that scale, an
-unwritten shared understanding of vocabulary and process fragments into
-as many slightly-different interpretations as there are people, which is
-exactly the vocabulary-drift problem this chapter opened with, now
-compounding on the process side rather than just the visual side. The
-concrete mitigations that scale: a written, versioned glossary
-(not a one-time onboarding doc but something actively maintained as
-terms get added or redefined), a Design QA checklist that's the same
-regardless of which designer/engineer pair is running it, and — as
-component and consumer count both grow — moving from "informal Slack
-thread review" to a structured design review meeting or async review tool
-with a defined SLA, mirroring the same RFC-process scaling logic covered
-in [Chapter 11](/chapters/governance).
+in the same room.
+
+Neither survives unchanged past the point where a design system has
+multiple designers contributing to the same Figma library and multiple
+engineers implementing from it. At that scale, an unwritten shared
+understanding of vocabulary and process fragments into as many
+slightly-different interpretations as there are people — exactly the
+vocabulary-drift problem this chapter opened with, now showing up in the
+process too, not just the visuals.
+
+The mitigations that actually scale: a written, versioned glossary (not
+a one-time onboarding doc, but something actively maintained as terms
+get added or redefined); a Design QA checklist that's the same no
+matter which designer/engineer pair is running it; and, as component and
+consumer count both grow, moving from "informal Slack thread review" to
+a structured design review meeting or async review tool with a defined
+SLA — the same scaling logic behind the RFC process covered in
+[Chapter 11](/chapters/governance).
 
 ## Common Mistakes
 
@@ -523,60 +589,69 @@ in [Chapter 11](/chapters/governance).
   Given a PNG export or a screenshot in a design ticket, an engineer
   under time pressure measures pixel distances in a screenshot tool and
   hardcodes `padding: 14px` — close to, but not exactly, the intended
-  `--spacing-md` token, which might resolve to 12px. This passes casual
-  code review (it *looks* right) and often passes even a first design
-  review pass (small enough to not be visually obvious), and only
-  surfaces as an accumulated inconsistency across many components much
-  later. The fix is structural, not behavioral: give engineers direct
-  access to the actual token values (via Figma Variables inspection, or
-  a published token reference), not just static exports, so there's
+  `--spacing-md` token, which might actually resolve to `12px`. This
+  passes casual code review (it *looks* right), and often even passes a
+  first design review pass, since it's small enough not to be visually
+  obvious. It only shows up as accumulated inconsistency across many
+  components, much later.
+
+  The fix is structural, not behavioral: give engineers direct access to
+  the actual token values — via Figma Variables inspection, or a
+  published token reference — not just static exports. That way there's
   never a reason to eyeball a measurement in the first place.
 </Callout>
 
 <Callout type="danger" title="Treating automated visual regression as a substitute for Design QA">
   A team ships a component, Chromatic reports zero visual diffs against
-  the previous release, and the team concludes it's correct — but
+  the previous release, and the team concludes it's correct. But
   Chromatic only proves the component didn't change relative to its
-  *own* last version, which says nothing about whether that version ever
-  matched the Figma spec in the first place. A component can be
-  pixel-stable release over release while being subtly wrong relative to
-  design intent from day one, and Chromatic will never flag it, because
-  it has no concept of what the Figma file says — only of what the
-  component looked like last time. Design QA (a human comparing shipped
-  output against the actual Figma spec) is the only check that catches
-  this category, and it needs to happen at least once per component,
-  not be assumed subsumed by visual regression tooling.
+  *own* last version — it says nothing about whether that version ever
+  matched the Figma spec in the first place.
+
+  A component can be pixel-stable release over release while being
+  subtly wrong relative to design intent from day one, and Chromatic
+  will never flag it, because it has no idea what the Figma file says —
+  only what the component looked like last time.
+
+  Design QA — a human comparing shipped output against the actual Figma
+  spec — is the only check that catches this category. It needs to
+  happen at least once per component, not get assumed to be covered by
+  visual regression tooling.
 </Callout>
 
 <Callout type="danger" title="Letting the code API and Figma variant structure diverge silently over time">
-  A Figma component set gains a new variant property (say, a `Density:
-  compact/comfortable` axis) that never gets a corresponding code prop,
+  A Figma component set gains a new variant property — say, a `Density:
+  compact/comfortable` axis — that never gets a matching code prop,
   because the designer who added it didn't know to loop in engineering,
   or assumed it was purely visual. Designers start using the new Figma
-  variant in mocks, engineers implement screens by eye since there's no
-  prop for it, and the "variant" now means genuinely different things
-  in the two tools — exactly the vocabulary drift this chapter is about,
-  reintroduced silently through an unreviewed Figma-side change. The fix
-  is process, not tooling: any new Figma variant property addition
-  should trigger the same design-review conversation as a new prop
-  addition would in code, because it effectively *is* one.
+  variant in mocks. Engineers implement screens by eye, since there's no
+  prop for it. Now "variant" genuinely means different things in the two
+  tools — exactly the vocabulary drift this chapter is about,
+  reintroduced silently through an unreviewed Figma-side change.
+
+  The fix is process, not tooling: any new Figma variant property should
+  trigger the same design-review conversation a new prop addition would
+  in code, because it effectively *is* one.
 </Callout>
 
 <Callout type="danger" title="Resolving design/engineering disagreements with authority instead of data">
   An engineer facing a design request they believe is technically
-  expensive or inconsistent responds with a flat "that's not possible"
+  expensive or inconsistent responds with a flat "that's not possible" —
   or, worse, silently implements an approximation without saying
-  anything — both respond to the disagreement without giving the
-  designer the information needed to make an informed tradeoff. A flat
-  "no" without cost framing reads as obstruction and damages the working
-  relationship even when the underlying technical concern is completely
-  valid; a silent approximation produces exactly the design-vs-code drift
-  this chapter is about, just introduced by engineering instead of a
-  missed handoff. The productive version states the actual cost (in
-  concrete terms — bundle size, render performance, accessibility
-  violation, maintenance burden across every future consumer) and
-  proposes an alternative that meets the same underlying design intent
-  more cheaply, rather than simply declining.
+  anything. Both responses fail to give the designer the information
+  they'd need to make an informed tradeoff.
+
+  A flat "no" without cost framing reads as obstruction and damages the
+  working relationship, even when the underlying technical concern is
+  completely valid. A silent approximation produces exactly the
+  design-vs-code drift this chapter is about — just introduced by
+  engineering this time, instead of a missed handoff.
+
+  The productive version states the actual cost in concrete terms —
+  bundle size, render performance, an accessibility violation,
+  maintenance burden across every future consumer — and proposes an
+  alternative that meets the same underlying design intent more cheaply,
+  instead of simply declining.
 </Callout>
 
 ## Best Practices
@@ -616,19 +691,20 @@ in [Chapter 11](/chapters/governance).
 
   **Poor answer:** "It helps you know what the design should look like."
 
-  **Good answer:** Figma variant properties map naturally to prop
-  unions, and auto-layout's flex-like reflow behavior mirrors how a
-  well-built code component should handle variable content — understanding
-  both lets you anticipate edge cases (long text, missing icon) the
-  design file already had to solve for.
+  **Good answer:** Figma variant properties map naturally onto prop
+  unions. Auto-layout's flex-like reflow behavior mirrors how a
+  well-built code component should handle variable content.
+  Understanding both lets you anticipate edge cases — long text, a
+  missing icon — that the design file already had to solve for.
 
-  **Excellent senior answer:** Gives a concrete example of the mapping
-  (a Size variant becoming a `size` prop union) and explains the
-  deliberate exception — Figma "State" variants like hover/disabled
-  usually should NOT become a code prop, since code handles those via
-  actual interaction/CSS pseudo-states, not a discrete variant selection
-  — showing the mirroring isn't blind 1:1 translation but requires
-  judgment about which Figma-side concepts are genuinely code-API-shaped.
+  **Excellent senior answer:** Gives a concrete example of the mapping —
+  a Size variant becoming a `size` prop union — and explains the
+  deliberate exception: Figma "State" variants like hover/disabled
+  usually should *not* become a code prop, since code handles those
+  through actual interaction and CSS pseudo-states, not a discrete
+  variant selection. Shows the mirroring isn't blind 1:1 translation,
+  but needs judgment about which Figma-side concepts are genuinely
+  code-API-shaped.
 
   **Common mistakes:** Describing Figma fluency only in terms of visual
   fidelity, without connecting it to concrete API design decisions.
@@ -640,19 +716,19 @@ in [Chapter 11](/chapters/governance).
 
   **Poor answer:** "Bad handoff means the engineer builds it wrong."
 
-  **Good answer:** Engineers eyeball spacing/color from a static image
-  since there's no other source, producing small, hard-to-catch
-  inaccuracies; a shared token source (Figma Variables synced with code
-  tokens) removes the need to eyeball anything, since the actual value is
-  available directly.
+  **Good answer:** Engineers eyeball spacing or color from a static
+  image because there's no other source, which produces small,
+  hard-to-catch inaccuracies. A shared token source (Figma Variables
+  synced with code tokens) removes the need to eyeball anything, since
+  the actual value is available directly.
 
   **Excellent senior answer:** Frames it as a root-cause fix specifically
-  because it removes the *opportunity* for the error (there's no
-  eyeballing to do if the token value is directly inspectable/exported)
-  rather than a mitigation that catches the error after the fact (like a
-  design review step) — and can name the newer mechanism (Figma
-  Variables, 2023) that made this a first-class, native capability rather
-  than something that required a third-party plugin.
+  because it removes the *opportunity* for the error — there's nothing
+  to eyeball if the token value is directly inspectable or exported —
+  rather than a mitigation that catches the error after the fact, like a
+  design review step. Can name the newer mechanism (Figma Variables,
+  2023) that made this a first-class, native capability, instead of
+  something that required a third-party plugin.
 
   **Common mistakes:** Proposing only process fixes (more review, better
   documentation) without identifying the structural fix that removes the
@@ -667,16 +743,16 @@ in [Chapter 11](/chapters/governance).
   is automated."
 
   **Good answer:** Visual regression compares a component against its
-  own previous version; Design QA compares it against the actual Figma
-  spec — a component can be stable release-over-release while still
-  being wrong relative to design intent, and only Design QA catches that.
+  own previous version. Design QA compares it against the actual Figma
+  spec. A component can be stable release-over-release while still being
+  wrong relative to design intent — only Design QA catches that.
 
-  **Excellent senior answer:** Gives a concrete example — a component
+  **Excellent senior answer:** Gives a concrete example: a component
   shipped with a slightly wrong spacing value from day one passes every
-  future Chromatic check because nothing changes relative to its own
+  future Chromatic check, because nothing changes relative to its own
   baseline, and stays wrong indefinitely until a human runs it against
-  the Figma spec directly — and notes both checks are necessary, neither
-  subsumes the other.
+  the Figma spec directly. Notes both checks are necessary, and neither
+  replaces the other.
 
   **Common mistakes:** Treating the two as redundant or assuming one
   makes the other unnecessary.
@@ -689,19 +765,20 @@ in [Chapter 11](/chapters/governance).
 
   **Poor answer:** "I'd tell them it's not feasible."
 
-  **Good answer:** States the concrete cost (bundle size for a
+  **Good answer:** States the concrete cost — bundle size for a
   positioning library, render performance implications, maintenance
-  burden) rather than a bare no, and proposes an alternative that meets
-  the actual design intent more cheaply — e.g. a well-tested library like
-  Floating UI handling the 90% case instead of a custom system.
+  burden — instead of a bare no, and proposes an alternative that meets
+  the actual design intent more cheaply. For example, a well-tested
+  library like Floating UI handling the 90% case instead of a custom
+  system.
 
   **Excellent senior answer:** Frames the negotiation around the actual
-  design *intent* (why do they want collision avoidance — probably so
-  tooltips never render off-screen) rather than the literal request, and
-  proposes the cheaper alternative that satisfies that intent, while
-  being explicit about what's genuinely lost by not building the fully
-  custom version, so the designer can make an informed tradeoff rather
-  than just being redirected.
+  design *intent* — why do they want collision avoidance? probably so
+  tooltips never render off-screen — rather than the literal request,
+  and proposes the cheaper alternative that satisfies that intent. Is
+  explicit about what's genuinely lost by not building the fully custom
+  version, so the designer can make an informed tradeoff instead of just
+  being redirected.
 
   **Common mistakes:** Either capitulating and building the expensive
   version without pushback, or refusing without offering any alternative
@@ -716,17 +793,18 @@ in [Chapter 11](/chapters/governance).
   **Poor answer:** "We'd just clarify what we mean each time."
 
   **Good answer:** A Figma "variant" refers to a specific property
-  combination within a component set; a code "variant" often refers to a
-  single prop value — related but not identical concepts, and using the
-  same word for both causes real confusion in design reviews and PRs.
+  combination within a component set. A code "variant" often refers to a
+  single prop value. These are related but not identical concepts, and
+  using the same word for both causes real confusion in design reviews
+  and PRs.
 
-  **Excellent senior answer:** Proposes the systemic fix — a living,
+  **Excellent senior answer:** Proposes the systemic fix: a living,
   reviewed glossary shared between the disciplines, not a one-time
-  clarification — and connects it to the broader pattern that any term
-  used differently across disciplines (also true of "component,"
-  "instance," "token") deserves the same treatment, since ad hoc
-  clarification doesn't scale as team size grows and new people join
-  without the shared context.
+  clarification. Connects it to the broader pattern — any term used
+  differently across disciplines (also true of "component," "instance,"
+  "token") deserves the same treatment, since ad hoc clarification
+  doesn't scale as the team grows and new people join without the
+  shared context.
 
   **Common mistakes:** Treating it as a one-off communication issue
   rather than a recurring, nameable pattern worth a structural fix.
@@ -739,20 +817,20 @@ in [Chapter 11](/chapters/governance).
 
   **Poor answer:** "You'd use a plugin to export Figma tokens to code."
 
-  **Good answer:** Describes a script (via Figma's REST/plugin API)
-  reading or writing Variables, reconciled against a code-side token
-  source, run automatically (CI schedule or triggered) rather than
-  manually — and identifies that exactly one side needs to be
+  **Good answer:** Describes a script, using Figma's REST or plugin API,
+  that reads or writes Variables and reconciles them against a code-side
+  token source. It runs automatically — on a CI schedule or a trigger —
+  rather than manually. Identifies that exactly one side needs to be
   authoritative.
 
   **Excellent senior answer:** Explains what breaks with no single
-  authority — both Figma and code can be edited independently, so without
+  authority: both Figma and code can be edited independently, so without
   a defined direction of truth and automated one-way propagation, the
-  two sources can each drift and there's no way to know which one is
-  "right" when they disagree, which reintroduces the exact drift problem
-  the sync was built to solve, just now with an extra layer of false
-  confidence that "we have a sync" when the sync itself doesn't enforce
-  a single source.
+  two sources can each drift, and there's no way to tell which one is
+  "right" when they disagree. That reintroduces the exact drift problem
+  the sync was built to solve — with an extra layer of false confidence,
+  since "we have a sync" now hides the fact that the sync doesn't
+  actually enforce a single source.
 
   **Common mistakes:** Describing a sync mechanism without addressing
   the authority-direction question, or assuming bidirectional sync is
@@ -771,18 +849,18 @@ in [Chapter 11](/chapters/governance).
   meeting."
 
   **Good answer:** Introduces a structured cost/alternative-framing
-  practice for pushback (never a bare no) and a design review process
-  that brings engineering in earlier, before a design is fully locked, so
-  technical constraints surface as input to the design rather than
-  after-the-fact rejection.
+  practice for pushback (never a bare no), and a design review process
+  that brings engineering in earlier — before a design is fully locked
+  — so technical constraints surface as input to the design instead of
+  an after-the-fact rejection.
 
-  **Excellent senior answer:** Diagnoses the root pattern — engineering
-  is likely being looped in too late, after a design is already
-  considered final, which structurally forces every technical concern to
-  look like rejection rather than collaborative input — and fixes the
-  process (earlier engineering involvement in design review) rather than
-  just coaching better communication on top of an unchanged process that
-  will keep producing the same dynamic.
+  **Excellent senior answer:** Diagnoses the root pattern: engineering is
+  likely being looped in too late, after a design is already considered
+  final, which structurally forces every technical concern to look like
+  rejection instead of collaborative input. Fixes the process — earlier
+  engineering involvement in design review — rather than just coaching
+  better communication on top of an unchanged process that will keep
+  producing the same dynamic.
 
   **Common mistakes:** Treating this as purely an interpersonal/
   communication issue rather than recognizing it as a symptom of a
@@ -795,18 +873,18 @@ in [Chapter 11](/chapters/governance).
 
   **Poor answer:** "I'd survey the team periodically."
 
-  **Good answer:** Tracks concrete signals — design review cycle time,
+  **Good answer:** Tracks concrete signals: design review cycle time,
   number of Design QA findings per component release (a proxy for
-  handoff quality), frequency of post-ship visual/behavioral corrections
-  attributable to spec drift.
+  handoff quality), and how often post-ship visual or behavioral
+  corrections trace back to spec drift.
 
   **Excellent senior answer:** Distinguishes leading indicators (review
-  cycle time, sync-pipeline failures/staleness) from lagging ones
+  cycle time, sync-pipeline failures or staleness) from lagging ones
   (Design QA findings, post-ship corrections), and explains why both
-  matter — leading indicators let you intervene before drift
-  accumulates, lagging indicators confirm whether the interventions
-  actually reduced real-world drift, and a mature process tracks both
-  rather than relying on either alone.
+  matter. Leading indicators let you step in before drift builds up.
+  Lagging indicators confirm whether the interventions actually reduced
+  real-world drift. A mature process tracks both, instead of relying on
+  either alone.
 
   **Common mistakes:** Proposing only a subjective survey without any
   measurable, process-level signal.
@@ -820,20 +898,20 @@ in [Chapter 11](/chapters/governance).
   **Poor answer:** "Engineering should always have final say since we
   build it."
 
-  **Good answer:** Distinguishes visual/UX intent (design's clear domain)
-  from API/implementation shape (which has real engineering
+  **Good answer:** Distinguishes visual/UX intent (clearly design's
+  domain) from API/implementation shape (which has real engineering
   consequences — breaking changes, migration cost, accessibility
-  implementation) and proposes joint sign-off specifically for changes
-  that cross both, rather than granting unilateral authority to either
+  implementation), and proposes joint sign-off specifically for changes
+  that cross both, rather than handing unilateral authority to either
   side.
 
   **Excellent senior answer:** Frames this explicitly as a governance
-  question, not a turf question — references the RFC-style review
+  question, not a turf question, and references the RFC-style review
   process (Chapter 11) as the existing mechanism that should already
-  require both design and engineering sign-off for API-level changes —
-  and reframes the underlying concern productively: if design feels
-  unable to move fast enough on legitimate UX improvements, that's a
-  process-latency problem to fix (faster review SLAs), not a reason to
+  require both design and engineering sign-off on API-level changes.
+  Reframes the underlying concern productively: if design feels unable
+  to move fast enough on legitimate UX improvements, that's a
+  process-latency problem to fix — faster review SLAs — not a reason to
   remove engineering's input on changes that carry real technical and
   migration cost.
 
@@ -845,31 +923,38 @@ in [Chapter 11](/chapters/governance).
 ## Summary
 
 Collaboration with designers is a distinct discipline from general
-product design-engineering work because a design system component is
-authored once but referenced everywhere, which means any drift between
-the Figma file and the shipped code compounds across every future usage
-rather than staying local to one screen. The default failure mode without
-deliberate practice is two independent, slowly diverging sources of
-truth — engineers eyeballing values from static exports, Figma variant
-properties added without a corresponding code prop — plus a genuine
-vocabulary gap where the same word ("variant") means structurally
-different things in each discipline's native tool. The structural fix is
-a single authoritative token source with automated, not manual,
-propagation to both Figma (via Variables, Figma's native token model
-since 2023) and code (via Style Dictionary or equivalent) — manual
-handoff and re-entry is where drift reliably creeps back in. Design
-review, happening before implementation, catches edge cases the design
-hasn't yet answered — empty states, overflow, RTL, error states. Design
-QA, happening after implementation, catches a category of bug automated
-visual regression structurally cannot: a component that's stable
-relative to its own previous version while still being wrong relative to
-the actual Figma spec. Resolving genuine design/engineering
-disagreements productively means leading with concrete cost (bundle
-size, performance, accessibility, maintenance burden) and a cheaper
-alternative that satisfies the actual design intent, rather than a bare
-refusal or silent non-compliant implementation — and unresolved
-disagreements need a defined escalation path rather than being left to
-whoever has more organizational leverage in the moment.
+product design-engineering work, because a design system component is
+authored once but referenced everywhere. Any drift between the Figma
+file and the shipped code compounds across every future use, instead of
+staying local to one screen.
+
+The default failure mode without deliberate practice is two independent
+sources of truth, slowly drifting apart — engineers eyeballing values
+from static exports, Figma variant properties added without a matching
+code prop — plus a genuine vocabulary gap, where the same word
+("variant") means structurally different things in each discipline's
+native tool.
+
+The structural fix is a single authoritative token source, with
+automated (not manual) propagation to both Figma (via Variables,
+Figma's native token model since 2023) and code (via Style Dictionary or
+equivalent). Manual handoff and re-entry is where drift reliably creeps
+back in.
+
+Design review, happening before implementation, catches edge cases the
+design hasn't yet answered — empty states, overflow, RTL, error states.
+Design QA, happening after implementation, catches a category of bug
+automated visual regression structurally can't: a component that's
+stable relative to its own previous version, while still being wrong
+relative to the actual Figma spec.
+
+Resolving genuine design/engineering disagreements productively means
+leading with concrete cost — bundle size, performance, accessibility,
+maintenance burden — and a cheaper alternative that satisfies the actual
+design intent, instead of a bare refusal or a silent, non-compliant
+implementation. Unresolved disagreements need a defined escalation path,
+rather than being left to whoever has more organizational leverage in
+the moment.
 
 **Key takeaways**
 
@@ -881,7 +966,7 @@ whoever has more organizational leverage in the moment.
   concrete mechanism for closing the handoff gap at the root.
 - Design review (before implementation, catches missing edge cases) and
   Design QA (after implementation, catches spec drift) are distinct
-  checks; automated visual regression subsumes neither.
+  checks. Automated visual regression replaces neither.
 - Mirror Figma variant properties in the component's prop API wherever
   the mapping is natural, but exercise judgment — not every Figma-side
   concept (like interaction states) should become a discrete code prop.
@@ -892,7 +977,7 @@ whoever has more organizational leverage in the moment.
   nameable pattern that needs a maintained shared glossary, not ad hoc
   per-conversation clarification.
 
-The token pipeline underlying the Figma-Variables-to-code sync described
+The token pipeline behind the Figma-Variables-to-code sync described
 here is covered in full mechanical depth in
 [Design Tokens](/chapters/design-tokens), including the Style Dictionary
 transform layer this chapter's sync script ultimately feeds into.

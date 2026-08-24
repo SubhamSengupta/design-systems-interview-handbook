@@ -6,160 +6,174 @@ export const metadata = {
 
 # 5. Accessibility
 
+## Quick Glance
+
+- Accessibility means components that work correctly with a keyboard, a screen reader, or an OS setting like reduced motion — not just how the component looks.
+- The core leverage argument: fix focus-trapping once inside `Dialog`, and every consumer inherits the fix forever. This is why accessibility belongs in the design system, not per-feature teams.
+- ARIA's first rule: if a native HTML element already has the behavior you need, use it. ARIA adds semantics (what a screen reader announces), it does not add behavior (focusability, keyboard activation) — that still has to be built by hand.
+- `role="button"` on a `div` is a code smell: it doesn't grant Tab focusability, Enter/Space activation, or correct Tab order. A real `<button>` restyled with CSS is almost always cheaper and more correct.
+- Roving tabindex is the standard pattern for composite widgets (Menu, Tabs, Tree View): exactly one item has `tabIndex={0}`, the rest have `tabIndex={-1}`, and arrow keys move which one is active. Tab moves focus out of the widget; arrow keys move within it.
+- A correct Dialog needs all four: focus moves inside on open, Tab is trapped inside it, Escape closes it, and focus is restored to the trigger element on close. Missing focus restoration is the most common gap.
+- WCAG AA contrast: 4.5:1 for normal text, 3:1 for large text (18pt+/24px+, or bold 14pt+/18.66px+) and for meaningful UI elements like icons and borders. This is computed from relative luminance, not eyeballed.
+- Automated tools (axe-core, Storybook's a11y addon) only catch roughly 30-40% of real WCAG failures — treat a clean scan as a floor, never proof of accessibility. Manual keyboard and screen reader testing (VoiceOver, NVDA, JAWS) is still required.
+- Most new design systems build interactive widgets on Radix UI or React Aria rather than hand-rolling focus traps and roving tabindex — reserve building from scratch for genuinely novel interactions.
+
 ## Definition
 
-Accessibility, in the design system context, is the practice of building
-components whose behavior — not just appearance — works correctly for
-people using a keyboard instead of a mouse, a screen reader instead of a
-screen, or an operating-system setting like reduced motion or high contrast
-instead of default rendering. It is measured against WCAG (Web Content
-Accessibility Guidelines), implemented through semantic HTML and ARIA, and,
-critically for this chapter, it is an *architectural* property of a
-component, not a checklist applied after the component ships. A `Dialog`
-that traps focus, restores it on close, and is announced correctly by a
-screen reader is not a "more accessible version" of a dialog — a dialog
-that doesn't do those things is broken for a defined, sizeable population of
-real users, in the same way a dialog that throws a JavaScript error for some
-users would be considered broken.
+Accessibility, in a design system, means building components whose
+*behavior* — not just their look — works correctly for people who use a
+keyboard instead of a mouse, a screen reader instead of a screen, or an
+operating-system setting like reduced motion or high contrast instead of
+the default rendering. It's measured against WCAG (Web Content
+Accessibility Guidelines) and built using semantic HTML and ARIA
+(Accessible Rich Internet Applications — a spec for describing custom
+widgets to assistive technology).
+
+Critically for this chapter, accessibility is an *architectural* property
+of a component, not a checklist you run after it ships. A `Dialog` that
+traps focus, restores it on close, and is announced correctly by a screen
+reader isn't a "more accessible version" of a dialog. A dialog that skips
+those things is simply broken for a real, sizeable group of users — the
+same way a dialog that throws a JavaScript error for some users would be
+considered broken.
 
 ## Problem Statement
 
-Accessibility bugs are two problems that compound each other. First, they're
-invisible to the majority of engineers testing a feature the normal way —
-click through it with a mouse, look at it, ship it. A missing `aria-label`,
-a focus trap that doesn't restore focus on close, a custom dropdown that
-can't be operated with arrow keys: none of these show up in a visual QA
-pass. Second, when they do get caught, they're almost always caught per
-feature, per team, after the component has already shipped — which means
+Accessibility bugs are really two problems that make each other worse.
+First, they're invisible to most engineers testing a feature the normal
+way: click through it with a mouse, look at it, ship it. A missing
+`aria-label`, a focus trap that doesn't restore focus on close, a custom
+dropdown that can't be driven with arrow keys — none of these show up in a
+visual QA pass. Second, when these bugs do get caught, it's almost always
+per feature, per team, after the component has already shipped. That means
 the same class of bug (an unlabeled icon button, a modal that doesn't trap
-focus) gets independently reimplemented and independently broken by every
-team building their own version of that pattern.
+focus) gets independently rebuilt, and independently broken, by every team
+that builds their own version of the same pattern.
 
 <Callout type="tip" title="The core leverage argument">
-  This is the single strongest argument for centralizing accessibility work
-  inside a design system rather than treating it as a per-feature
-  responsibility: **fix focus-trapping once, correctly, inside `Dialog`, and
-  every consumer of `Dialog` — today and in every future feature built on
-  it — inherits the fix for free.** The alternative is teaching every
-  feature team the WAI-ARIA Authoring Practices for dialogs, trusting every
-  team to implement it correctly, and re-auditing every team's
-  implementation independently forever. A design system turns an
-  organization-wide, unbounded accessibility liability into a single,
-  auditable, one-time engineering investment. This is why accessibility
-  work is consistently one of the highest-ROI investments a design system
-  team can make, and why it should be treated as core system architecture,
-  not a "nice to have" backlog item.
+  This is the strongest argument for putting accessibility work inside a
+  design system rather than treating it as each feature team's own job:
+  **fix focus-trapping once, correctly, inside `Dialog`, and every consumer
+  of `Dialog` — today and in every future feature built on it — gets the
+  fix for free.** The alternative is teaching every feature team the
+  WAI-ARIA Authoring Practices for dialogs, trusting every team to get it
+  right, and re-auditing every team's implementation forever. A design
+  system turns an open-ended, org-wide liability into one auditable,
+  one-time investment. This is why accessibility work is consistently one
+  of the highest-return investments a design system team can make, and why
+  it should be treated as core architecture — not a "nice to have" backlog
+  item.
 </Callout>
 
 The problem this chapter solves is narrower than "how do I make a webpage
-accessible" — it's "what specifically does a design system need to get
-right, once, at the primitive layer, so that every consuming team's product
-is accessible by construction rather than by diligence."
+accessible." It's: "what exactly does a design system need to get right,
+once, at the primitive layer, so every consuming team's product is
+accessible by default, instead of relying on each team's diligence?"
 
 ## Why Does This Exist?
 
-Accessibility as a discipline exists because the web's native elements
+Accessibility exists as a discipline because the web's native elements
 (`<button>`, `<select>`, `<a>`) come with keyboard operability, focus
-management, and screen reader semantics built in, for free, by the browser
-— and the moment a team reaches for a custom-styled `<div>` with an
-`onClick` handler instead, all of that free behavior disappears and has to
-be manually rebuilt. This happens constantly in design systems specifically
-because visual design requirements (a dropdown that looks nothing like a
-native `<select>`, a toggle that looks nothing like a checkbox) push teams
-away from native elements toward custom markup, and custom markup is where
-all the free browser behavior has to be hand-reimplemented or is silently
-lost. Design systems exist partly to solve exactly this: give teams a
-`<Select>` that *looks* like the Figma spec but *behaves* like the native
-element underneath, so nobody downstream has to choose between visual
-fidelity and accessibility.
+management, and screen reader semantics built in — free, from the browser.
+The moment a team reaches for a custom-styled `<div>` with an `onClick`
+handler instead, all of that free behavior disappears, and someone has to
+rebuild it by hand. This happens constantly in design systems specifically
+because visual requirements — a dropdown that looks nothing like a native
+`<select>`, a toggle that looks nothing like a checkbox — push teams away
+from native elements toward custom markup. And custom markup is exactly
+where all that free browser behavior gets lost or has to be reimplemented.
+Design systems exist partly to fix this: give teams a `<Select>` that
+*looks* like the Figma spec but *behaves* like the native element
+underneath, so nobody downstream has to trade visual fidelity for
+accessibility.
 
 Legal and regulatory pressure is the second real driver. The ADA (in the
-US), the European Accessibility Act, and similar regulations have produced
-real litigation exposure for inaccessible commercial products — this is not
-a hypothetical risk for large consumer or enterprise-software companies, and
-it's a large part of why accessibility budget gets approved at the
-executive level in a way that other quality investments sometimes don't.
+US), the European Accessibility Act, and similar laws have produced real
+litigation risk for inaccessible commercial products. This isn't a
+hypothetical for large consumer or enterprise-software companies, and it's
+a big reason accessibility budget gets approved at the executive level in a
+way other quality investments sometimes don't.
 
 ## Historical Context
 
-Section 508 (US federal accessibility law, 1998, significantly updated
+Section 508 (US federal accessibility law, 1998, updated significantly in
 2017) and WCAG 1.0 (1999) predate modern component-driven frontend
-development entirely — they were written against static HTML documents.
-WCAG 2.0 (2008) and 2.1 (2018) extended the guidelines to cover dynamic,
-scripted interfaces, which is when ARIA (first published as a W3C spec in
+development entirely — they were written for static HTML documents. WCAG
+2.0 (2008) and 2.1 (2018) extended the guidelines to cover dynamic,
+scripted interfaces. That's when ARIA (first published as a W3C spec in
 2008, stabilized through the 2010s) became necessary: ARIA exists
-specifically to describe the semantics of the custom, JavaScript-driven
-widgets that plain HTML has no vocabulary for (a combobox, a tree, a tab
-panel). The WAI-ARIA Authoring Practices Guide (APG) — the canonical
-reference for "how do I build an accessible `[Dialog/Menu/Tabs/...]`" — has
-been iteratively refined since and is the primary source every serious
-design system's accessible-pattern implementation is checked against.
+specifically to describe the semantics of custom, JavaScript-driven widgets
+that plain HTML has no vocabulary for — a combobox, a tree, a tab panel.
+The WAI-ARIA Authoring Practices Guide (APG) — the standard reference for
+"how do I build an accessible Dialog/Menu/Tabs/etc." — has been refined
+ever since, and it's the primary source every serious design system checks
+its accessible-pattern implementations against.
 
-The design-systems-specific history matters too: early large design
-systems (Bootstrap's original dropdown/modal JS, jQuery UI) had
+The design-systems-specific history matters too. Early large design systems
+(Bootstrap's original dropdown/modal JavaScript, jQuery UI) had
 accessibility bolted on unevenly, patched over years as bugs were reported.
 The generation of design systems and headless libraries built from roughly
 2018 onward — Reach UI (Ryan Florence, since folded into Radix), Radix UI,
 React Aria (Adobe), Headless UI, Ariakit — were built accessibility-first
-from day one, with the APG patterns as the literal specification for each
-component's behavior, not a retrofit. This is why the current default
-recommendation for a new design system's interactive primitives is almost
-always "build on one of these, don't hand-roll focus trapping and roving
-tabindex from scratch" — see the [Alternatives](#alternatives) section
-below.
+from day one, using the APG patterns as the actual specification for each
+component's behavior, not a retrofit. This is why the default
+recommendation for a new design system's interactive primitives today is
+almost always "build on one of these, don't hand-roll focus trapping and
+roving tabindex from scratch" — see the [Alternatives](#alternatives)
+section below.
 
 ## How It Works Internally
 
-Four mechanisms do almost all of the work described in this chapter's
-topic list: the accessibility tree, ARIA's role/state/property model, focus
-management, and assistive technology's consumption of live regions.
+Four mechanisms do almost all of the work covered in this chapter: the
+accessibility tree, ARIA's role/state/property model, focus management, and
+how assistive technology consumes live regions.
 
-**The accessibility tree.** The browser builds a parallel tree alongside the
-DOM — the accessibility tree — by computing, for every element, an
+**The accessibility tree.** The browser builds a parallel tree alongside
+the DOM — the accessibility tree — by computing, for every element: an
 accessible **role** (what kind of thing is it — button, checkbox, dialog),
-an accessible **name** (what should it be announced as — from text content,
-`aria-label`, `aria-labelledby`, or associated `<label>`), and an accessible
-**state** (checked, expanded, disabled, selected). Screen readers query
-*this* tree, not the visual DOM. Every ARIA attribute you add is either
-directly setting a slot in this tree (`role`, `aria-label`) or modifying how
-the browser computes one (`aria-hidden` removes a subtree from the tree
-entirely). This is why two visually identical elements — a real `<button>`
+an accessible **name** (what should it be announced as — from text
+content, `aria-label`, `aria-labelledby`, or an associated `<label>`), and
+an accessible **state** (checked, expanded, disabled, selected). Screen
+readers query *this* tree, not the visual DOM. Every ARIA attribute you add
+either sets a slot in this tree directly (`role`, `aria-label`) or changes
+how the browser computes one (`aria-hidden` removes a whole subtree from
+the tree). This is why two visually identical elements — a real `<button>`
 and a `<div onClick>` — produce a completely different accessibility tree
-node unless you manually give the `div` `role="button"`, `tabIndex={0}`, and
-keyboard handlers to match.
+node, unless you manually give the `div` `role="button"`, `tabIndex={0}`,
+and keyboard handlers to match.
 
-**ARIA's first rule.** The WAI-ARIA spec itself states this explicitly: *if
-a native HTML element or attribute has the semantics and behavior you
-require, use it instead of re-purposing an element and adding ARIA.* ARIA
-can describe a role, but it cannot grant behavior — adding `role="button"`
-to a `div` tells assistive technology "announce this as a button," but the
-browser does not thereby make it focusable, or make Enter/Space activate
-it, or add it to Tab order. Those all have to be manually added back. This
-is why `role="button"` on a `div` is a code smell in any component review —
-it's almost always cheaper and more correct to render an actual `<button>`
-and override its default styles than to reconstruct a button's behavior
-from ARIA plus manual event handlers.
+**ARIA's first rule.** The WAI-ARIA spec says this explicitly: *if a native
+HTML element or attribute already has the semantics and behavior you need,
+use it instead of repurposing an element and adding ARIA.* ARIA can
+describe a role, but it cannot grant behavior. Adding `role="button"` to a
+`div` tells assistive technology "announce this as a button," but the
+browser doesn't thereby make it focusable, or make Enter/Space activate it,
+or put it in Tab order. All of that still has to be added back by hand.
+This is why `role="button"` on a `div` is a code smell in any component
+review — it's almost always cheaper and more correct to render an actual
+`<button>` and override its default styles than to reconstruct a button's
+behavior from ARIA plus manual event handlers.
 
 **Focus management.** The browser tracks exactly one focused element at a
-time (`document.activeElement`), and only elements that are focusable
-(native interactive elements, or anything with an explicit `tabindex`) can
-receive it. Two focus mechanisms matter for composite widgets: **Tab order**
-moves focus between *independent* interactive elements (moving from a
-dialog to the field after it), and **roving tabindex** (or `aria-activedescendant`)
+time (`document.activeElement`), and only focusable elements (native
+interactive elements, or anything with an explicit `tabindex`) can receive
+it. Two focus mechanisms matter for composite widgets: **Tab order** moves
+focus between *independent* interactive elements (moving from a dialog to
+the field after it), and **roving tabindex** (or `aria-activedescendant`)
 moves focus *within* a single composite widget (moving between items in a
-menu) using arrow keys instead of Tab, because Tab is reserved for leaving
+menu) using arrow keys instead of Tab — because Tab is reserved for leaving
 the widget entirely. Getting this distinction right is the difference
 between a menu that behaves like every other menu a screen reader user has
-ever encountered and one that traps them or skips content.
+ever used, and one that traps them or skips content.
 
 **Live regions and AT consumption.** Screen readers narrate the
-accessibility tree on demand (as focus moves, as the user navigates), but
-they do not automatically announce content that changes *without* a focus
-change — a toast notification appearing, a form validation error appearing
-after submit, a loading spinner resolving. `aria-live` regions solve this:
-marking a container `aria-live="polite"` (or `"assertive"` for urgent
-content) tells the browser to notify the AT whenever that container's
-content changes, even without a focus move, and the AT queues an
+accessibility tree on demand — as focus moves, as the user navigates — but
+they don't automatically announce content that changes *without* a focus
+change: a toast notification appearing, a form validation error showing up
+after submit, a loading spinner resolving. `aria-live` regions solve this.
+Marking a container `aria-live="polite"` (or `"assertive"` for urgent
+content) tells the browser to notify assistive technology whenever that
+container's content changes, even with no focus move, and the AT queues an
 announcement for it. This is the mechanism behind every "accessible toast"
 or "accessible form error" implementation.
 
@@ -181,32 +195,31 @@ graph TD
 
 Read this as the decision path every interactive design-system component
 should be checked against, top to bottom: start from the WCAG bar, prefer a
-native element that clears it automatically, and only build the ARIA +
-keyboard + focus-management stack by hand when no native element covers the
-required interaction — at which point every layer (role/state, keyboard
-model, focus management) has to be deliberately engineered to feed a
-correct accessibility tree.
+native element that already clears it, and only build the ARIA + keyboard
++ focus-management stack by hand when no native element covers the needed
+interaction. At that point, every layer (role/state, keyboard model, focus
+management) has to be deliberately built to feed a correct accessibility
+tree.
 
 ## Real-World Example
 
 Radix UI's `Dialog` primitive is the most-cited reference implementation in
-the industry for this chapter's Dialog pattern: it composes
-`focus-trap`-equivalent logic internally, restores focus to the triggering
-element on close, sets `aria-modal="true"` and wires `aria-labelledby`/
-`aria-describedby` automatically from its `Dialog.Title`/`Dialog.Description`
-sub-components, and closes on Escape — all without the consumer writing any
-of that logic themselves, only supplying markup and styles. GitHub's
-Primer design system and Shopify's Polaris both publish explicit
-accessibility documentation per component (keyboard interaction tables,
-ARIA usage notes) as a first-class part of their component docs, not an
-appendix — Polaris in particular documents exact keyboard shortcuts per
-composite widget in the same reference table as props. Adobe's Spectrum
-(via React Aria, referenced further in
+the industry for this chapter's Dialog pattern. It handles focus-trapping
+internally, restores focus to the triggering element on close, sets
+`aria-modal="true"`, and wires up `aria-labelledby`/`aria-describedby`
+automatically from its `Dialog.Title`/`Dialog.Description` sub-components,
+and closes on Escape — all without the consumer writing any of that logic
+themselves, only supplying markup and styles. GitHub's Primer design system
+and Shopify's Polaris both publish explicit accessibility documentation per
+component (keyboard interaction tables, ARIA usage notes) as a first-class
+part of their docs, not an afterthought — Polaris in particular documents
+exact keyboard shortcuts per composite widget in the same reference table
+as its props. Adobe's Spectrum (via React Aria, referenced further in
 [Chapter 3](/chapters/component-architecture) and
 [Chapter 14](/chapters/case-studies)) is built by an accessibility-focused
-team from the ground up and is frequently the reference other design
+team from the ground up, and it's frequently the reference other design
 systems' engineers consult when implementing a pattern the APG covers only
-loosely, such as a combobox with async-loaded options.
+loosely, like a combobox with options that load asynchronously.
 
 ## Implementation Example
 
@@ -215,7 +228,7 @@ loosely, such as a combobox with async-loaded options.
 Roving tabindex means exactly one item in the composite widget has
 `tabIndex={0}` (the "current" item, reachable by Tab) and every other item
 has `tabIndex={-1}` (in the DOM, focusable programmatically, but skipped by
-Tab); arrow keys move which item holds `tabIndex={0}` and call `.focus()`
+Tab). Arrow keys move which item holds `tabIndex={0}` and call `.focus()`
 on it directly.
 
 ```tsx
@@ -426,8 +439,8 @@ export function Dialog({
 ```
 
 <Callout type="tip" title="Don't hand-roll this in application code">
-  The Dialog above is deliberately shown in full because understanding the
-  mechanics matters for interviews and debugging — but in a real design
+  The Dialog above is shown in full on purpose — understanding the
+  mechanics matters for interviews and debugging. But in a real design
   system, build this on a maintained primitive (Radix UI's `Dialog`, React
   Aria's `useDialog` + `usePreventScroll` + `FocusScope`, or the
   `focus-trap` / `focus-trap-react` library for the trapping piece alone).
@@ -535,15 +548,16 @@ export function usePrefersReducedMotion(): boolean {
 ```
 
 This ties directly into the token architecture in
-[Chapter 2](/chapters/design-tokens): motion, like color and spacing, should
-be a token category, not a hardcoded value scattered across component
-files, precisely so it can be gated globally like this.
+[Chapter 2](/chapters/design-tokens): motion, like color and spacing,
+should be its own token category — not a hardcoded value scattered across
+component files — specifically so it can be gated globally like this.
 
 ### Color contrast — the actual math
 
-WCAG 2.1's contrast requirement is a ratio between the relative luminance of
-foreground and background colors, computed from each color's sRGB channels
-via a gamma-correction formula, then expressed as `(L1 + 0.05) / (L2 + 0.05)`
+WCAG 2.1's contrast requirement is a ratio between the relative luminance
+(perceived brightness, computed mathematically) of the foreground and
+background colors. It's computed from each color's sRGB channels using a
+gamma-correction formula, then expressed as `(L1 + 0.05) / (L2 + 0.05)`,
 where `L1` is the lighter color's luminance and `L2` the darker. The
 practical thresholds:
 
@@ -552,7 +566,7 @@ practical thresholds:
 - **3:1** — large text (18pt+/24px+, or 14pt+/18.66px+ bold), and for
   non-text UI elements like icons, focus indicators, and input borders
   that convey meaning, at WCAG AA.
-- **7:1 / 4.5:1** — the AAA equivalents of the above, rarely mandated for
+- **7:1 / 4.5:1** — the AAA equivalents of the above, rarely required for
   enterprise products but sometimes required for government/public-sector
   contracts.
 
@@ -588,55 +602,56 @@ export function meetsWcagAA(ratio: number, isLargeText: boolean): boolean {
 ```
 
 This math is exactly why a token system's color ramp (see
-[Chapter 2](/chapters/design-tokens)) can't be designed purely on visual
-taste — every semantic pairing a design system ships as a default (`text-
-primary` on `surface-default`, `text-on-brand` on `brand-500`) has to be
-checked against this formula and locked in as a *contract*, not a
-suggestion, because a designer adjusting a brand color's lightness by a few
+[Chapter 2](/chapters/design-tokens)) can't be designed on visual taste
+alone. Every semantic pairing a design system ships as a default
+(`text-primary` on `surface-default`, `text-on-brand` on `brand-500`) has
+to be checked against this formula and locked in as a *contract*, not a
+suggestion — because a designer nudging a brand color's lightness by a few
 percentage points in Figma can silently drop a previously-compliant pairing
 below 4.5:1.
 
 ## Advantages
 
-Centralizing accessibility in the design system converts an unbounded,
-recurring liability (every team re-implementing and re-breaking the same
-patterns) into a bounded, one-time investment with compounding returns —
-every new consumer of `Dialog`, `Menu`, or `Tabs` inherits a correct
-implementation without needing an accessibility specialist on their own
-team. It also produces consistent behavior across the entire product
-surface, which matters specifically for AT users: a screen reader user who
-learns how one product's dialogs behave can rely on that behavior
-everywhere the same design system is used, the same way sighted users rely
-on visual consistency. And centralization makes accessibility auditable —
-one axe-core/manual-testing pass against the design system's Storybook
-covers the primitive behavior for every consumer, rather than requiring a
-full audit of every individual product surface.
+Centralizing accessibility in the design system turns an unbounded,
+recurring liability — every team re-implementing and re-breaking the same
+patterns — into a bounded, one-time investment with returns that keep
+paying off. Every new consumer of `Dialog`, `Menu`, or `Tabs` inherits a
+correct implementation without needing an accessibility specialist on their
+own team. It also produces consistent behavior across the whole product
+surface, which matters specifically for assistive-technology (AT) users: a
+screen reader user who learns how one product's dialogs behave can trust
+that behavior everywhere the same design system is used — the same way
+sighted users rely on visual consistency. Centralizing also makes
+accessibility auditable: one axe-core/manual-testing pass against the
+design system's Storybook covers the primitive behavior for every
+consumer, instead of requiring a full audit of every individual product
+surface.
 
 ## Disadvantages
 
 Correct accessibility implementations are genuinely more code and more
-edge cases than the visual-only version — focus trapping, roving tabindex,
+edge cases than the visual-only version. Focus trapping, roving tabindex,
 and live-region wiring all have real complexity, and getting them wrong in
-a subtle way (a focus trap that doesn't restore focus to a *dynamically
+a subtle way — a focus trap that doesn't restore focus to a *dynamically
 removed* trigger element, a roving tabindex that breaks when items are
-added/removed at runtime) can be worse than not attempting the pattern at
-all, because it produces a false sense of coverage. Centralizing also means
-a bug here has outsized blast radius in the other direction from the
-Chapter 4 argument — an accessibility regression in `Dialog` breaks every
-consumer's modals simultaneously, which is exactly the reasoning that
-justifies the investment but also raises the bar for how carefully changes
-to these primitives need to be tested and reviewed. And design-system-level
-accessibility work can't fully absorb feature-level responsibility: a
-correctly built `Dialog` primitive doesn't guarantee a feature team writes a
-meaningful `aria-label`, structures heading levels correctly, or writes
-accessible copy — the primitive removes an entire class of bug, not all of
-them.
+added or removed at runtime — can be worse than not attempting the pattern
+at all, because it creates a false sense of coverage. Centralizing also
+means a bug here has an outsized blast radius, in the opposite direction
+from the leverage argument above: an accessibility regression in `Dialog`
+breaks every consumer's modals at once. That's exactly the reasoning that
+justifies the investment, but it also raises the bar for how carefully
+changes to these primitives need to be tested and reviewed. And
+design-system-level accessibility work can't fully cover feature-level
+responsibility: a correctly built `Dialog` primitive doesn't guarantee a
+feature team writes a meaningful `aria-label`, structures heading levels
+correctly, or writes accessible copy — the primitive removes one whole
+class of bug, not all of them.
 
 ## Alternatives
 
 The practical decision most design system teams face isn't "should we do
 accessibility" — it's "do we build these interaction patterns ourselves, or
-build on a headless accessibility-focused library and add only styling."
+build on a headless accessibility-focused library and add only styling?"
 
 | Dimension | Build from scratch | Radix UI (headless primitives) | React Aria / React Aria Components (Adobe) | Native HTML only, no custom widgets |
 | --- | --- | --- | --- | --- |
@@ -651,86 +666,87 @@ build on a headless accessibility-focused library and add only styling."
 | When to choose it | Genuinely novel interaction with no existing pattern to build on | Default choice for most new React design systems needing custom-styled widgets | When internationalization, virtualized lists, or drag-and-drop within accessible widgets are required alongside a11y | Marketing sites, content-heavy pages, anywhere native elements suffice |
 | When NOT to choose it | Almost never justified for standard patterns (Dialog, Menu, Tabs, Combobox) | When you need hooks-only (no bundled markup) for a fully custom render structure | When bundle size is extremely constrained and you don't need i18n/virtualization | The moment a design spec requires a visual that native elements can't produce |
 
-Building from scratch is rarely justified today for standard patterns —
-Dialog, Menu, Tabs, Tooltip, Combobox are all well-covered by the WAI-ARIA
-APG and by mature libraries, and the edge cases (focus restoration to a
-removed trigger, `aria-activedescendant` vs roving tabindex tradeoffs,
-right-to-left keyboard direction) have already been debugged by teams with
-far more AT-testing resources than most product companies can justify
-standing up internally. This is why the current generation of design
-systems — shadcn/ui, Vercel's own component patterns, most new internal
-enterprise systems built since ~2021 — build their styled components on top
-of Radix UI or React Aria rather than reimplementing ARIA patterns, and why
-even design systems with a long pre-existing custom implementation (older
-versions of Material-UI, Ant Design) have incrementally migrated toward
-these unstyled primitives or React Aria's hooks under the hood over time.
-The build-vs-adopt calculus only flips toward "build" when a company the
-size of Adobe, Google, or Microsoft can justify a dedicated internal
-accessibility engineering team whose full-time job is exactly this — most
-companies are correctly better served putting that same engineering time
-into design-system-specific integration and design-token-driven contrast
-enforcement instead of re-deriving what Radix or React Aria already ship.
+Building from scratch is rarely justified today for standard patterns.
+Dialog, Menu, Tabs, Tooltip, and Combobox are all well covered by the
+WAI-ARIA APG and by mature libraries, and the edge cases — focus
+restoration to a removed trigger, `aria-activedescendant` versus roving
+tabindex tradeoffs, right-to-left keyboard direction — have already been
+debugged by teams with far more AT-testing resources than most product
+companies can justify standing up internally. This is why the current
+generation of design systems — shadcn/ui, Vercel's own component patterns,
+most new internal enterprise systems built since roughly 2021 — build
+their styled components on top of Radix UI or React Aria rather than
+reimplementing ARIA patterns from scratch. Even design systems with a long
+pre-existing custom implementation (older versions of Material-UI, Ant
+Design) have gradually migrated toward these unstyled primitives or React
+Aria's hooks under the hood over time. The build-vs-adopt calculus only
+flips toward "build" when a company the size of Adobe, Google, or Microsoft
+can justify a dedicated internal accessibility engineering team whose
+full-time job is exactly this. Most companies are better served putting
+that same engineering time into design-system-specific integration and
+token-driven contrast enforcement, instead of re-deriving what Radix or
+React Aria already ship.
 
 ## Tradeoffs
 
 The core tradeoff in this chapter is upfront implementation cost versus
-downstream liability. A correct `Dialog` with full focus trapping, live
+downstream liability. A correct `Dialog` — with full focus trapping, live
 regions wired everywhere they're needed, and roving tabindex on every
-composite widget takes measurably longer to build than a visually
-equivalent version without any of that — but the alternative isn't "ship
-faster," it's "ship a liability every consuming team inherits silently
+composite widget — takes measurably longer to build than a visually
+equivalent version without any of that. But the alternative isn't "ship
+faster." It's "ship a liability every consuming team quietly inherits,
 until an audit, a lawsuit, or a real user's bug report surfaces it." The
 second tradeoff is `role="button"`-on-a-div convenience versus semantic
 correctness: reaching for ARIA to make a non-semantic element "look right"
 to a screen reader is almost always more code and more edge cases than
-using the native element and overriding its visual style — CSS can restyle
+using the native element and overriding its visual style. CSS can restyle
 a `<button>` into almost anything; ARIA cannot retrofit real keyboard
 behavior onto a `<div>`. And automated testing versus manual testing is a
-real tradeoff in engineering time: automated tools are fast and catch a
+real engineering-time tradeoff: automated tools are fast and catch a
 meaningful floor of issues, but as covered below, they structurally cannot
 catch everything, and skipping manual keyboard/screen-reader testing to
-save time produces a false sense of coverage that's arguably worse than no
-testing at all, because it creates unwarranted confidence.
+save time produces false confidence — arguably worse than no testing at
+all, because it hides the gap instead of flagging it.
 
 ## Performance Considerations
 
 Accessibility and performance intersect in a few concrete ways relevant to
-a design system specifically. Live regions (`aria-live`) should be
-sparingly and deliberately placed — a page with many overlapping live
-regions, or a live region whose content updates at high frequency (a
-progress percentage updating every 100ms), produces a genuinely bad,
-overwhelming experience for AT users, distinct from any visual performance
-metric but just as real a regression. Focus-trap implementations that
-re-query the DOM for focusable elements on every keystroke (rather than
-caching the list and invalidating it only on relevant DOM mutations) can
+a design system specifically. Live regions (`aria-live`) should be placed
+sparingly and deliberately — a page with many overlapping live regions, or
+a live region whose content updates at high frequency (a progress
+percentage updating every 100ms), creates a genuinely overwhelming
+experience for AT users. It's a real regression, distinct from any visual
+performance metric but just as real. Focus-trap implementations that
+re-query the DOM for focusable elements on every keystroke (instead of
+caching the list and invalidating it only on relevant DOM changes) can
 introduce measurable input lag in a dialog with many form fields — this is
 a real profiling target, not a hypothetical. And screen readers re-parse
-the accessibility tree on DOM mutation, so components that re-render large
-subtrees unnecessarily (see [Chapter 4](/chapters/react-architecture) on
-context-driven re-render fan-out) impose a real, if less commonly measured,
-cost on AT users' navigation smoothness, on top of the visual jank sighted
-users experience from the same root cause.
+the accessibility tree on every DOM change, so components that re-render
+large subtrees unnecessarily (see [Chapter 4](/chapters/react-architecture)
+on context-driven re-render fan-out) impose a real, if less commonly
+measured, cost on AT users' navigation smoothness — on top of the visual
+jank sighted users experience from the same root cause.
 
 ## Scalability Considerations
 
 At small scale, one team can hold the entire set of accessibility patterns
-in their head and manually verify each feature. That stops working the
+in their head and manually check each feature. That stops working the
 moment a design system has enough consumers that most product engineers
-building on top of it have never read the WAI-ARIA APG and shouldn't need
-to — which is the normal state for any design system past its first year.
-Scaling accessibility means investing in things that catch regressions
-*without* requiring every consuming engineer to be an accessibility expert:
+building on it have never read the WAI-ARIA APG — and shouldn't need to.
+That's the normal state for any design system past its first year. Scaling
+accessibility means investing in things that catch regressions *without*
+requiring every consuming engineer to become an accessibility expert:
 CI-enforced `jest-axe` checks on every component (see Testing below),
 Storybook's a11y addon surfaced directly in the same PR review flow
 engineers already use, and documented keyboard-interaction tables per
 component so a consuming engineer can self-serve "does this widget support
 arrow-key navigation" instead of filing a question. It also means treating
-accessibility regressions with the same severity classification as
-functional bugs or visual regressions in the design system's own release
-process (see [Chapter 11](/chapters/governance)) — an accessibility
-regression that ships in a minor version and silently breaks focus
-management for every `Dialog` consumer is not a lower-severity bug than a
-visual one, even though it's frequently treated that way in practice.
+accessibility regressions with the same severity as functional bugs or
+visual regressions in the design system's own release process (see
+[Chapter 11](/chapters/governance)) — an accessibility regression that
+ships in a minor version and silently breaks focus management for every
+`Dialog` consumer is not a lower-severity bug than a visual one, even
+though it's often treated that way in practice.
 
 ## Common Mistakes
 
@@ -821,10 +837,10 @@ visual one, even though it's frequently treated that way in practice.
   accessibility bug fixed once in a primitive is fixed for every current
   and future consumer, whereas per-feature ownership means the same class
   of bug (missing focus trap, unlabeled icon button) gets independently
-  reimplemented and independently broken by every team, forever, with no
-  way to audit it centrally. Adds that this doesn't remove all
-  feature-level responsibility — copy, heading structure, and content-level
-  a11y still belong to feature teams.
+  rebuilt and independently broken by every team, forever, with no way to
+  audit it centrally. Adds that this doesn't remove all feature-level
+  responsibility — copy, heading structure, and content-level a11y still
+  belong to feature teams.
 
   **Common mistakes:** Treating it as purely a compliance/legal argument
   without articulating the engineering-leverage argument, which is the
@@ -1030,28 +1046,28 @@ visual one, even though it's frequently treated that way in practice.
 
 ## Summary
 
-Accessibility in a design system is not a per-component checklist run at
-the end — it's an architectural property that has to be designed in from
-the start, because the leverage argument cuts both ways: a correct `Dialog`
+Accessibility in a design system isn't a per-component checklist run at the
+end — it's an architectural property that has to be designed in from the
+start. The leverage argument cuts both ways: a correct `Dialog`
 implementation benefits every consumer forever, and a broken one breaks
-every consumer's modals simultaneously. The practical foundation is WCAG's
-POUR principles enforced at AA, native HTML preferred wherever it suffices,
-and ARIA reserved for genuinely novel widgets — with the discipline to
-remember ARIA only adds semantics, never behavior, so keyboard interaction
-and focus management always have to be engineered by hand alongside it.
-Composite widgets need roving tabindex or `aria-activedescendant` for
-intra-widget navigation, dialogs need full focus trapping and restoration,
-async updates need deliberately-placed live regions, color pairings need to
-be checked against the actual luminance-based contrast formula rather than
-eyeballed, and motion needs to be gated behind `prefers-reduced-motion` at
-the token layer. Automated tooling (axe-core, the Storybook a11y addon)
-should be a mandatory CI floor, never mistaken for complete coverage —
-manual keyboard and real screen reader testing remain non-negotiable
-because roughly 60-70% of real-world accessibility failures are
-structurally invisible to automated scanners. Most new design systems today
-correctly build these patterns on top of Radix UI or React Aria rather than
-reimplementing the WAI-ARIA Authoring Practices from scratch, reserving
-custom implementation for genuinely novel interactions.
+every consumer's modals at once. The practical foundation is WCAG's POUR
+principles enforced at AA, native HTML preferred wherever it's enough, and
+ARIA reserved for genuinely novel widgets — with the discipline to remember
+that ARIA only adds semantics, never behavior, so keyboard interaction and
+focus management always have to be built by hand alongside it. Composite
+widgets need roving tabindex or `aria-activedescendant` for intra-widget
+navigation. Dialogs need full focus trapping and restoration. Async updates
+need deliberately-placed live regions. Color pairings need to be checked
+against the actual luminance-based contrast formula rather than eyeballed.
+Motion needs to be gated behind `prefers-reduced-motion` at the token
+layer. Automated tooling (axe-core, the Storybook a11y addon) should be a
+mandatory CI floor, never mistaken for complete coverage — manual keyboard
+and real screen reader testing remain non-negotiable, because roughly
+60-70% of real-world accessibility failures are structurally invisible to
+automated scanners. Most new design systems today correctly build these
+patterns on top of Radix UI or React Aria rather than reimplementing the
+WAI-ARIA Authoring Practices from scratch, reserving custom implementation
+for genuinely novel interactions.
 
 **Key takeaways**
 

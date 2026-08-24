@@ -6,134 +6,151 @@ export const metadata = {
 
 # 7. Storybook
 
+## Quick Glance
+
+- Storybook is a workshop for building and testing UI components on their own, outside the app that uses them.
+- A **story** is one named rendering of a component in one state (`Default`, `Loading`, `Disabled`).
+- CSF (Component Story Format) makes stories plain, exported objects that tools can read without running the app — CSF3 (Storybook 7) simplified this further.
+- Big idea to remember: every tool (docs, Controls, Chromatic, the a11y addon, play functions) reads the same story files, so nothing drifts out of sync.
+- **Autodocs** builds a full docs page straight from your TypeScript prop types and stories — no hand-written Markdown needed.
+- **Play functions** run real clicks/keystrokes against a rendered story and assert on the result — this is a test and a demo in one file.
+- **Chromatic** takes a screenshot of every story on every push and flags pixel differences for a human to accept or reject.
+- The **a11y addon** runs `axe-core` on every story automatically, catching about a third of real accessibility issues (the mechanically checkable ones).
+- If asked "why Storybook over building components inside the app": say it removes the tax of navigating an app to reach one edge-case state.
+- If asked "does Storybook replace E2E/integration testing": no — it deliberately skips real routing, data fetching, and app composition.
+
 ## Definition
 
-**Storybook** is a workshop environment for building, viewing, and testing
-UI components in isolation from the application(s) that consume them. A
-**story** is a single, named rendering of a component in one state — one
-combination of props, one piece of data, one interaction sequence — and a
-component typically has many stories (`Default`, `Loading`, `Disabled`,
-`WithError`, `LongLabel`). Storybook compiles every story into a
-standalone, addressable page, wraps them in a shared UI (the sidebar,
-canvas, and addon panel), and layers tooling on top — controls, docs
-generation, interaction testing, accessibility auditing, visual diffing —
-that turns the story set into the primary review and QA surface for a
-design system.
+**Storybook** is a workshop for building, viewing, and testing UI
+components on their own — separate from the app(s) that use them. A
+**story** is one named picture of a component in one state: one set of
+props, one piece of data, one interaction. A component usually has many
+stories (`Default`, `Loading`, `Disabled`, `WithError`, `LongLabel`).
+
+Storybook turns every story into its own page. It wraps all the pages in
+one shared UI — a sidebar, a canvas, and an addon panel — and adds tools on
+top: controls for editing props live, automatic docs, interaction tests,
+accessibility checks, and visual diffing. Together, these tools make the
+story set the main place a design system gets reviewed and checked.
 
 ## Problem Statement
 
-Say you're building a `Combobox` component with async search, multi-select,
-keyboard navigation, an error state, and a max-selection limit. To see the
-"5 items selected, at the max limit, one item has a validation error" state
-in a real application, you'd need to: find or fake the right backend
-response, navigate to the screen that uses this combobox, drive the UI
-through five interactions to reach that exact state, and hope a page reload
-during development doesn't reset you back to square one. Multiply that by
-every state combination across every component in the library, and by every
-reviewer or designer who needs to independently verify the same states
-before sign-off — the app-navigation tax makes exhaustive review
-economically impossible. Teams respond by *not* reviewing edge-case states,
-which is exactly where design systems break down in practice: the demo
-looks right, the disabled-and-loading combo three clicks deep does not.
+Say you're building a `Combobox` component with async search,
+multi-select, keyboard navigation, an error state, and a max-selection
+limit. You want to see the state "5 items selected, at the max limit, one
+item has a validation error" inside a real application. To get there you'd
+need to: find or fake the right backend response, navigate to the screen
+that uses this combobox, click through five steps to reach that exact
+state, and hope a page reload during development doesn't send you back to
+square one.
 
-There's a second, sharper version of this problem specific to design
-systems: your components are consumed by *other people's* applications,
-which you often don't have running locally and can't easily drive into a
-target state. A design system needs a way to develop and demonstrate a
-component's full state surface with zero dependency on any consuming app.
-That's the gap Storybook fills — an environment where "loading, with an
-error, at max width, in dark mode" is one click in a sidebar, not a
-scripted sequence through a product you don't own.
+Now multiply that by every state combination, across every component, for
+every reviewer or designer who needs to check the same states before
+sign-off. This "app-navigation tax" makes full review too expensive to do
+in practice. So teams stop reviewing edge cases — which is exactly where
+design systems break in the real world. The demo looks right, but the
+disabled-and-loading combination three clicks deep does not.
+
+There's a second, sharper version of this problem. Design system
+components are used by *other people's* applications — apps you often
+can't run locally and can't easily steer into a specific state. A design
+system needs a way to build and show a component's full range of states
+with zero dependency on any app that consumes it. That's the gap Storybook
+fills: "loading, with an error, at max width, in dark mode" becomes one
+click in a sidebar, not a scripted walk through a product you don't own.
 
 ## Why Does This Exist?
 
-Storybook was created in 2016 (originally as a fork of `react-storybook`
-inside the Kadira team, later independently maintained) explicitly to solve
-component isolation for React, and it generalized from there to Vue,
-Angular, Svelte, and Web Components. The motivating insight was that
-**component development and application development have different unit of
-work**: an app developer cares about a screen, a design system engineer
-cares about a component's full prop/state matrix. Trying to develop and
-review design-system components inside an app forces app-shaped workflows
-(routing, data fetching, screen composition) onto a fundamentally
-component-shaped problem.
+Storybook was created in 2016, originally as a fork of `react-storybook`
+inside the Kadira team, later maintained independently. It was built to
+solve component isolation for React, then spread to Vue, Angular, Svelte,
+and Web Components. The core insight: **building a component and building
+an app are different jobs.** An app developer thinks in terms of a screen.
+A design system engineer thinks in terms of a component's full set of
+props and states. Trying to build and review design-system components
+inside an app forces app-shaped work (routing, data fetching, screen
+layout) onto a problem that's really about components.
 
-The deeper reason it stuck — and became close to the default tool in this
-space — is organizational, not just technical. A design system sits between
-two disciplines that don't share a codebase: design and engineering.
-Storybook's rendered, URL-addressable story ("here's the `Button` in its
-`disabled` + `loading` state, share this link") became the first *shared
-artifact* both sides could point at, comment on, and treat as the ground
-truth for "does the implementation match the design." Before Storybook (or
-similar tools), that ground truth was either a Figma file that drifted from
-the shipped code, or a staging URL of a whole app that buried the component
-inside unrelated context.
+The deeper reason Storybook stuck — and became close to the default tool
+in this space — is organizational, not just technical. A design system
+sits between two groups that don't share a codebase: design and
+engineering. A Storybook story is rendered and has its own URL, so
+"here's the `Button` in its `disabled` + `loading` state, share this link"
+became the first artifact *both* sides could open, click through, and
+comment on. It became the shared ground truth for "does the code match
+the design." Before Storybook (or a similar tool), that ground truth was
+either a Figma file that had drifted from the shipped code, or a staging
+URL for a whole app that buried the one component you cared about inside
+everything else.
 
 ## Historical Context
 
-Storybook's evolution tracks the evolution of component-driven React
-itself. Early versions (v1–v3, 2016–2018) used a `storiesOf()` imperative
-API and were primarily a dev-time visual playground — useful, but discarded
-in CI because there was no story format a build tool could statically
-analyze. **CSF (Component Story Format)**, introduced with Storybook 5.2
-in 2019, changed that: stories became plain ES module exports, which meant
-tooling (bundlers, docs generators, test runners) could statically discover
-every story without executing Storybook itself. **CSF3**, shipped with
-Storybook 7 (2023), simplified the format further — stories became plain
-objects instead of functions, args became the default way to configure a
-story, and the boilerplate needed per story dropped by roughly half.
+Storybook's history tracks the history of component-driven React itself.
+Early versions (v1–v3, 2016–2018) used an imperative `storiesOf()` API and
+were mostly a dev-time visual playground — useful, but usually skipped in
+CI, because there was no story format a build tool could scan without
+actually running Storybook. **CSF (Component Story Format)**, introduced
+in Storybook 5.2 (2019), changed that. Stories became plain ES module
+exports, so tooling (bundlers, docs generators, test runners) could find
+every story just by reading the file, with no need to run Storybook
+itself. **CSF3**, shipped with Storybook 7 (2023), simplified the format
+further: stories became plain objects instead of functions, "args" (a
+story's props, described below) became the default way to configure a
+story, and the amount of boilerplate per story dropped by roughly half.
 
-Storybook 7 (2023) was the bigger architectural shift: **Autodocs** moved
-from an addon bolted onto stories to a first-class, story-driven mechanism;
-Vite became a first-class builder alongside Webpack, cutting Storybook's
-own startup and rebuild time dramatically for large component libraries;
-and the testing surface (play functions, the interactions addon) matured
-enough that teams began treating Storybook as a legitimate part of the test
-suite, not just a docs/demo tool. Storybook 8 (2024) unified the testing
-story further by standardizing on `@storybook/test` (a wrapper around
-`@testing-library/dom` and `vitest`'s expect) so the same assertion syntax
-works inside a play function and inside a standalone test file — closing
-the gap between "a story" and "a test" almost entirely. This is also the
-period Chromatic — built by the same core team as Storybook — became the
-default pairing for visual regression, because it consumes stories directly
-with no separate test-authoring step.
+Storybook 7 (2023) was the bigger architectural shift. **Autodocs** moved
+from being a bolted-on addon to a first-class, story-driven feature. Vite
+became a first-class builder alongside Webpack, which cut Storybook's own
+startup and rebuild time a lot for large component libraries. And the
+testing tools (play functions, the interactions addon) matured enough
+that teams started treating Storybook as a real part of the test suite,
+not just a docs tool. Storybook 8 (2024) tied the testing story together
+further by standardizing on `@storybook/test` — a wrapper around
+`@testing-library/dom` and Vitest's `expect` — so the same assertion
+syntax works both inside a play function and inside a standalone test
+file. This closed most of the gap between "a story" and "a test." This
+period is also when Chromatic — built by the same core team as Storybook —
+became the default pairing for visual regression testing, because it
+reads stories directly with no separate step to write tests.
 
 ## How It Works Internally
 
-Storybook is, mechanically, a static site generator plus a dev server built
-around one core idea: **a story is a pure function of args to a rendered
-component**. At build (or dev-server start) time, Storybook:
+Storybook is, mechanically, a static site generator plus a dev server,
+built around one idea: **a story is a pure function that turns args
+(props) into a rendered component.** At build time (or when the dev
+server starts), Storybook:
 
-1. **Discovers** every `*.stories.tsx` file matching the glob in
+1. **Finds** every `*.stories.tsx` file matching the pattern set in
    `.storybook/main.ts`.
-2. **Statically analyzes** each file's exports via its bundler (Vite or
-   Webpack) to build an index of every story — its title, args, and
-   metadata — without fully executing application code. This index is
-   what powers the sidebar and search instantly, even in a library with
+2. **Reads each file's exports statically**, using its bundler (Vite or
+   Webpack), to build an index of every story — its title, args, and
+   metadata — without fully running your application code. This index is
+   what makes the sidebar and search feel instant, even in a library with
    thousands of stories.
-3. **Renders** the requested story's default export (the `Meta`) merged
-   with the individual story's `args` into the framework's real render
-   function (`ReactDOM.render` under the hood for the React renderer) inside
-   an iframe (`preview-iframe.html`), isolated from Storybook's own UI
-   chrome (the "manager"). This iframe/manager split is deliberate: the
-   manager (sidebar, toolbar, addon panels) and the preview (your actual
-   component) run in separate execution contexts communicating over
-   `postMessage`, so an addon reading React DevTools-style data from your
-   component can't accidentally leak Storybook's own React tree, and a
-   crash in your component doesn't take down the whole UI.
-4. **Extracts type information** for Controls and Autodocs via
-   `react-docgen-typescript` (or the lighter `react-docgen` for plain JS),
-   which parses your component's TypeScript prop types statically — this
-   is the same mechanism that also powers the auto-generated docs, covered
-   below.
+3. **Renders** the requested story. It merges the story's own `args` into
+   the shared defaults from the file's `Meta` export, then hands that off
+   to the framework's real render function (plain `ReactDOM.render` under
+   the hood for React). This happens inside an iframe
+   (`preview-iframe.html`) that's kept separate from Storybook's own UI
+   (called the "manager"). This split is deliberate: the manager (sidebar,
+   toolbar, addon panels) and the preview (your actual component) run in
+   separate contexts, talking to each other over `postMessage`. That way
+   an addon reading data from your component can't accidentally leak
+   Storybook's own internals, and a crash inside your component doesn't
+   take down the whole UI.
+4. **Pulls out type information** for Controls and Autodocs using
+   `react-docgen-typescript` (or the lighter `react-docgen` for plain JS).
+   This tool reads your component's TypeScript prop types directly from
+   the source — the same mechanism that powers the auto-generated docs,
+   covered below.
 
-This architecture is why Storybook scales to component libraries with
-hundreds of components and thousands of stories without every developer's
-laptop grinding to a halt: only the story index needs to be built eagerly;
-individual story modules are code-split and loaded on demand by the
-bundler, and Storybook 7+'s Vite builder specifically leans on native ESM
-so a story's dev-server startup and HMR cost is close to instant regardless
-of how many *other* stories exist in the repo.
+This is why Storybook can scale to hundreds of components and thousands
+of stories without grinding every developer's laptop to a halt. Only the
+story index has to be built up front. Individual story files are split
+and loaded on demand by the bundler, and Storybook 7+'s Vite builder
+leans on native ESM (the browser's built-in module system) so a story's
+startup and hot-reload time stay close to instant, no matter how many
+*other* stories exist in the repo.
 
 ## Architecture
 
@@ -153,56 +170,58 @@ graph TD
   E --> M["a11y addon<br/>(axe-core scan)"]
 ```
 
-The important structural point this diagram makes: **stories are the
-single input that every downstream tool consumes** — docs, controls,
-interaction tests, visual regression, and accessibility checks all derive
-from the same story definitions rather than from separately maintained
-artifacts. That single-source property is what prevents docs drift (see
-[Autodocs](#autodocs) below) and is the main architectural argument for
-adopting Storybook over hand-rolling a docs site plus a separate test
-suite plus a separate manual QA checklist.
+The key point this diagram makes: **stories are the single input every
+other tool reads from.** Docs, controls, interaction tests, visual
+regression, and accessibility checks all come from the same story files,
+instead of from separately maintained artifacts. That single-source
+property is what keeps docs from drifting out of sync (see
+[Autodocs](#autodocs) below), and it's the main reason to pick Storybook
+over hand-building a docs site plus a separate test suite plus a manual
+QA checklist.
 
 ## Real-World Example
 
 Shopify's Polaris, Adobe's Spectrum, IBM's Carbon, and Atlassian's design
-system all publish a public Storybook (or a Storybook-derived docs site) as
-their canonical component reference — not incidentally, but because it's
-the artifact both their internal consumers and their own design/engineering
-review loop already use daily. Atlassian in particular has spoken publicly
-about using Storybook plus Chromatic as the *release gate* for their
-`@atlaskit` packages: a PR that changes a shared primitive (say, a token
-consumed by `Button`) cannot merge until Chromatic shows every affected
-story's visual diff has been explicitly accepted by a human, which turns an
-otherwise invisible cascading regression into a concrete, reviewable diff
-list. This is the pattern most large orgs converge on: Storybook is not
-"the place developers preview components" so much as "the shared surface
-design and engineering both sign off against before a component ships."
+system all publish a public Storybook (or a Storybook-based docs site) as
+their main component reference. That's not an accident — it's the same
+tool their internal teams and their own design/engineering review process
+already use every day. Atlassian in particular has talked publicly about
+using Storybook plus Chromatic as a *release gate* for their `@atlaskit`
+packages: a PR that changes a shared primitive (say, a token used by
+`Button`) can't merge until Chromatic shows every affected story's visual
+diff, and a human has explicitly accepted each one. That turns an
+otherwise invisible cascading regression into a concrete list a reviewer
+can check. This is the pattern most large companies land on: Storybook
+isn't just "where developers preview components" — it's the shared
+surface design and engineering both sign off on before a component ships.
 
 ## Implementation Example
 
 ### Component Driven Development in practice
 
-**Component Driven Development (CDD)** is the methodology Storybook is
-built to support: build UI bottom-up, starting from the smallest
-independent pieces (atoms: `Icon`, `Text`, `Button`) and composing upward
-into molecules (`FormField` = `Label` + `Input` + `HelperText`) and
-eventually screens — verifying each layer in isolation *before* composing
-it into the next. This deliberately mirrors a design system's own
-hierarchy (see [Chapter 1](/chapters/what-is-a-design-system) on
-primitive vs. composite layers): a `Button`'s states are fully specified
-and reviewed as a story before anyone builds the `Dialog` that uses three
-buttons in a footer, so a bug in `Dialog` can be immediately localized to
-composition logic rather than re-litigating whether `Button` itself is
-correct. The alternative — building top-down from a full screen and
-carving out reusable pieces afterward — tends to produce components that
-only actually work in the one screen shape they were extracted from,
-because their prop surface was never independently stress-tested.
+**Component Driven Development (CDD)** is the approach Storybook is built
+to support: build UI from the bottom up. Start with the smallest
+independent pieces (atoms like `Icon`, `Text`, `Button`), combine them
+into molecules (`FormField` = `Label` + `Input` + `HelperText`), and
+eventually build full screens — checking each layer on its own *before*
+combining it into the next. This mirrors a design system's own layering
+(see [Chapter 1](/chapters/what-is-a-design-system) on primitive vs.
+composite layers). A `Button`'s states get fully specified and reviewed
+as a story before anyone builds the `Dialog` that uses three buttons in a
+footer. That way, a bug in `Dialog` can be traced straight to the
+composition logic, instead of re-litigating whether `Button` itself is
+correct.
+
+The alternative — building a full screen first and carving out reusable
+pieces afterward — tends to produce components that only really work in
+the one screen shape they were pulled out of, because their prop surface
+was never tested on its own.
 
 ### CSF3 stories
 
-Here's a production-shaped story file for a `Combobox` component — note
-that this covers ordinary variants, an interaction test, and explicit
-accessibility-relevant states in the same file:
+Here's a production-shaped story file for a `Combobox` component. It
+covers ordinary variants, an interaction test, and accessibility-relevant
+states in the same file:
 
 ```tsx
 // Combobox.stories.tsx
@@ -292,160 +311,165 @@ export const KeyboardNavigation: Story = {
 
 ### Args and Controls
 
-**Args** are a story's props, represented as a plain serializable object
-rather than JSX — `Default.args = { label: "Favorite fruit" }` instead of
-`<Combobox label="Favorite fruit" />`. This is a deliberate design choice,
-not a stylistic one: because args are plain data, Storybook can generate a
-UI to *edit* them at runtime (the **Controls** addon panel) without needing
-to re-parse or re-render your JSX — it just re-invokes the story function
-with a new args object. Controls infers the right input widget (text field,
-boolean toggle, number stepper, color swatch, `select`/`radio` for a union
-type) directly from the component's TypeScript prop types via
-`react-docgen-typescript`, and `argTypes` in the `Meta` lets you override
-that inference where the automatic guess isn't the most useful one (e.g.
-constraining a `string` prop that's really a closed set of design tokens to
-a `select` control, as shown for `size` above).
+**Args** are a story's props, written as a plain object instead of JSX —
+`Default.args = { label: "Favorite fruit" }` instead of `<Combobox
+label="Favorite fruit" />`. This is a deliberate choice, not a style
+preference. Because args are plain data, Storybook can build a UI to
+*edit* them while you watch (the **Controls** addon panel) without
+needing to re-parse or re-render your JSX — it just calls the story
+function again with a new args object.
 
-The practical payoff: Controls *is* the props-testing playground teams used
-to hand-build — a page with a component and a pile of ad hoc toggles wired
-up to `useState`. That playground is now generated for free from the same
-type information the compiler already checks, so it can never drift out of
-sync with the component's actual prop surface the way a hand-maintained one
-inevitably does.
+Controls picks the right input for each prop (text field, toggle, number
+stepper, color swatch, a dropdown for a fixed set of options) by reading
+the component's TypeScript prop types through `react-docgen-typescript`.
+The `argTypes` field on `Meta` lets you override that automatic guess
+when it's not the most useful one — for example, restricting a `string`
+prop that's really a closed set of design tokens to a dropdown, as shown
+for `size` above.
+
+The practical payoff: Controls is the props-testing playground teams used
+to build by hand — a page with a component and a pile of toggles wired up
+to `useState`. That playground now comes for free, generated from the
+same type information the compiler already checks. It can never drift out
+of sync with the component's real prop surface the way a hand-built one
+always eventually does.
 
 ### Autodocs
 
-**Autodocs** generates a full docs page — prop table, description,
-canonical example, every story rendered inline — directly from a
-component's stories and TypeScript types, with zero hand-written
-Markdown required beyond the `tags: ["autodocs"]` line shown above. The
-mechanism: Storybook's docs preset reads the same `react-docgen-typescript`
-output Controls uses (prop names, types, default values, JSDoc comments on
-each prop) to build the props table, and it renders each named export from
-the `.stories.tsx` file as a live example beneath it. Because the docs page
-and the props table are *derived*, not authored, from the stories and types
-that already have to stay correct for the component to compile and for
-existing stories to render, there's no separate "docs" artifact that can
-silently fall out of sync with the implementation — the classic failure
-mode of hand-written component docs, where a prop gets renamed and the
-Markdown doc quietly keeps referencing the old name for months. Teams
-augment Autodocs with an `## Usage` MDX doc block per component for
-narrative guidance (when to use this vs. a related component, accessibility
-notes) but the generated prop table and example gallery are never
-hand-maintained.
+**Autodocs** builds a full docs page — a prop table, a description, a
+canonical example, and every story rendered inline — straight from a
+component's stories and TypeScript types. You don't write any Markdown
+beyond the `tags: ["autodocs"]` line shown above.
+
+Here's the mechanism: Storybook's docs preset reads the same
+`react-docgen-typescript` output that Controls uses (prop names, types,
+default values, JSDoc comments on each prop) to build the props table,
+and it renders each named export from the `.stories.tsx` file as a live
+example underneath it. Because the docs page and props table are
+*derived* — not hand-written — from the stories and types that already
+have to stay correct for the component to compile, there's no separate
+"docs" artifact that can silently fall out of sync with the real
+component. That's the classic failure of hand-written component docs: a
+prop gets renamed, and the Markdown doc quietly keeps referencing the old
+name for months. Teams still add an `## Usage` MDX doc block per
+component for narrative guidance (when to use this vs. a related
+component, accessibility notes), but the generated prop table and example
+gallery are never hand-maintained.
 
 ### Play functions and interaction tests
 
-A **play function**, as shown in `KeyboardNavigation` above, runs inside
-the browser after a story renders and drives real DOM events —
+A **play function**, shown in `KeyboardNavigation` above, runs in the
+browser right after a story renders. It drives real DOM events —
 `userEvent.type`, `userEvent.click`, `userEvent.keyboard` — against the
-rendered component, then asserts on the result with `expect` from
+rendered component, then checks the result with `expect` from
 `@storybook/test` (which re-exports Vitest's `expect` plus DOM matchers).
-This deliberately blurs the line between "a story" and "a test": the same
-file that documents a component's states also verifies its behavior, and
-the **Interactions addon panel** lets a developer step through each
-`step()` block visually, watching the DOM change in real time — genuinely
-useful for debugging a flaky interaction in a way a headless test runner's
+This blurs the line between "a story" and "a test" on purpose: the same
+file that shows a component's states also checks its behavior. The
+**Interactions addon panel** lets a developer step through each `step()`
+block visually, watching the DOM change in real time. This is genuinely
+useful for debugging a flaky interaction in a way a plain test runner's
 stack trace isn't.
 
 Storybook 8's **test runner** (`@storybook/test-runner`, built on
-Playwright) executes every story's play function headlessly in CI,
-turning the whole story file into a CI-gating test suite with no separate
-test files to maintain. This matters specifically for the bug class
-interaction tests catch that a pure unit test (rendering a component and
-asserting on its output) does not: real focus order across a multi-step
-keyboard flow, whether a second click while a request is in flight
-double-submits, whether `Escape` correctly returns focus to the trigger
-element. [Chapter 8](/chapters/testing-strategy) goes deeper on where
-interaction testing sits relative to unit and E2E testing in a design
-system's test pyramid specifically.
+Playwright) runs every story's play function headlessly in CI, turning
+the whole story file into a CI-gating test suite with no separate test
+files to maintain. This matters for a specific class of bugs that a plain
+unit test (render a component, check its output) can't catch: real focus
+order across a multi-step keyboard flow, whether a second click while a
+request is in flight double-submits, whether pressing `Escape` correctly
+returns focus to the trigger element.
+[Chapter 8](/chapters/testing-strategy) goes deeper on where interaction
+testing sits relative to unit and E2E testing in a design system's test
+pyramid.
 
 ### Chromatic and visual regression testing
 
 **Chromatic**, built by the Storybook core team, takes a screenshot of
-every story on every push, and diffs each screenshot pixel-by-pixel
+every story on every push, then diffs each screenshot pixel-by-pixel
 against an accepted baseline for that story. Mechanically: Chromatic
-renders your Storybook in a set of real browsers on its own infrastructure
-(so results are consistent regardless of which OS/GPU a contributor's
-laptop has), captures a DOM snapshot plus a rendered screenshot per story,
-and computes a perceptual diff against the last-accepted snapshot for that
-exact story. Where the diff exceeds a threshold, the PR gets a "changes
-found" status and a reviewer sees a side-by-side (or overlay/slider) view
-of exactly which pixels changed — accepting the diff makes it the new
-baseline; rejecting it blocks the merge.
+renders your Storybook in a set of real browsers on its own
+infrastructure (so results stay consistent no matter which OS or GPU a
+contributor's laptop has), captures a DOM snapshot plus a screenshot per
+story, and compares it against the last-accepted snapshot for that exact
+story. When the difference is bigger than a threshold, the PR gets a
+"changes found" status, and a reviewer sees a side-by-side (or
+overlay/slider) view of exactly which pixels changed. Accepting the diff
+makes it the new baseline; rejecting it blocks the merge.
 
-This is the practical alternative to a human eyeballing every PR's visual
-output: at more than a few dozen components, no reviewer reliably notices
-that a shared spacing token change nudged forty components' padding by
-2px, but a pixel diff catches it unconditionally, every time, on every
-affected story — including ones the PR author never thought to manually
-check. The tradeoff, covered in more depth in
-[Chapter 8](/chapters/testing-strategy), is that pixel diffing has a real
-false-positive rate from font antialiasing, animation timing, and
-non-deterministic content, which is why teams pin fonts, disable CSS
-transitions in the test environment, and freeze non-deterministic data
-(dates, random IDs) specifically for snapshot stories.
+This replaces a human eyeballing every PR's visual output. Past a few
+dozen components, no reviewer reliably notices that a shared spacing
+token change nudged forty components' padding by 2px — but a pixel diff
+catches it every time, on every affected story, including ones the PR
+author never thought to check by hand. The tradeoff — covered more in
+[Chapter 8](/chapters/testing-strategy) — is that pixel diffing has a
+real false-positive rate, caused by font antialiasing, animation timing,
+and content that isn't the same every run. That's why teams pin fonts,
+turn off CSS transitions in the test environment, and freeze
+non-deterministic content (dates, random IDs) specifically for snapshot
+stories.
 
 ### The accessibility addon
 
 The **a11y addon** (`@storybook/addon-a11y`) runs **axe-core** — the same
-open-source accessibility rules engine used by Lighthouse and most browser
-a11y devtools — against the currently rendered story's DOM, automatically,
-every time you view a story or switch args in Controls. Violations
-(missing accessible names, insufficient color contrast, invalid ARIA
-attribute combinations, focusable elements with no visible focus indicator)
-show up as a categorized list in the addon panel with a link to the
-specific WCAG success criterion violated, letting a developer catch a
-regression *while building the component*, not after a separate a11y audit
-pass weeks later. Paired with the test runner, the a11y addon's checks can
-also run headlessly in CI and fail the build on new violations — turning
-"accessible by default" from a policy into an enforced gate. The addon's
-coverage has the same structural limits as any automated a11y tool
-(roughly a third of WCAG success criteria are mechanically checkable at
-all); [Chapter 5](/chapters/accessibility) covers what automated tooling
-catches versus what still requires a manual or screen-reader pass.
+open-source accessibility rules engine used by Lighthouse and most
+browser a11y devtools — against the current story's rendered DOM. It runs
+automatically, every time you view a story or change args in Controls.
+Violations (missing accessible names, low color contrast, invalid ARIA
+attribute combinations, focusable elements with no visible focus ring)
+show up as a categorized list in the addon panel, with a link to the
+specific WCAG success criterion that was violated. This lets a developer
+catch a regression *while building the component*, instead of during a
+separate a11y audit weeks later.
+
+Paired with the test runner, the a11y addon's checks can also run
+headlessly in CI and fail the build on new violations — turning
+"accessible by default" from a policy into an enforced gate. The addon
+has the same limits as any automated a11y tool: roughly a third of WCAG
+success criteria can be checked mechanically at all.
+[Chapter 5](/chapters/accessibility) covers what automated tooling catches
+versus what still needs a manual or screen-reader pass.
 
 ## Advantages
 
-- **Isolation eliminates the app-navigation tax.** Every state is one
-  sidebar click away, which is what actually makes exhaustive review of
-  edge cases economically feasible rather than theoretical.
-- **Single source of truth for docs, controls, tests, and visual
+- **Isolation removes the app-navigation tax.** Every state is one
+  sidebar click away, which is what actually makes full review of edge
+  cases realistic instead of theoretical.
+- **One source of truth for docs, controls, tests, and visual
   baselines.** All four are derived from the same stories, so they can't
-  drift independently the way four separately maintained artifacts would.
-- **Shared review surface between design and engineering.** A story URL is
-  something a designer can open, click through states, and comment on
-  without touching code or running the app locally.
-- **Framework-agnostic wrapper around the same core model.** The same CSF
-  mental model works across React, Vue, Angular, Svelte, and Web
-  Components, which matters for design systems that ship multi-framework
-  bindings (see [Chapter 6](/chapters/styling-architecture) on
-  multi-framework styling concerns).
+  drift apart the way four separately maintained artifacts would.
+- **A shared review surface between design and engineering.** A story URL
+  is something a designer can open, click through, and comment on without
+  touching code or running the app locally.
+- **Framework-agnostic.** The same CSF mental model works across React,
+  Vue, Angular, Svelte, and Web Components — useful for design systems
+  that ship bindings for more than one framework (see
+  [Chapter 6](/chapters/styling-architecture) on multi-framework styling).
 - **CI-gatable.** Both Chromatic (visual) and the test runner
-  (interaction/a11y) can block a merge, converting "please remember to
+  (interaction/a11y) can block a merge, turning "please remember to
   check this" into an enforced pipeline step.
 
 ## Disadvantages
 
-- **Real setup and maintenance cost.** `.storybook/main.ts` configuration,
-  addon compatibility across major version bumps, and keeping the build
-  fast as story count grows into the thousands are ongoing engineering
-  work, not a one-time cost.
+- **Real setup and maintenance cost.** Configuring `.storybook/main.ts`,
+  keeping addons compatible across major version bumps, and keeping the
+  build fast as story count grows into the thousands are ongoing work,
+  not a one-time cost.
 - **A second build target.** Stories need their own decorators/mocks for
   anything that depends on app-level context (routing, auth, a data
-  provider) — that context has to be faked inside Storybook, which is
-  duplicate infrastructure to maintain alongside the app's real providers.
-- **Chromatic is a paid product at scale.** The free tier's snapshot quota
-  is exhausted quickly by an active monorepo with thousands of stories and
-  frequent pushes; budgeting for it is a real line item, not incidental.
-- **False sense of coverage.** A component can have a beautifully complete
-  story set and still ship with a business-logic bug, because stories
-  intentionally don't exercise real data-fetching, routing, or app state —
-  that's out of scope by design, not a gap to "fix."
-- **Interaction tests inside Storybook can outgrow the tool.** Once a play
-  function needs deep async mocking or cross-page assertions, that's a
-  signal to move the scenario into Playwright rather than stretching
-  Storybook to cover it (see [Chapter 8](/chapters/testing-strategy)).
+  provider). That context has to be faked inside Storybook, which is
+  extra infrastructure to maintain alongside the app's real providers.
+- **Chromatic costs money at scale.** The free tier's snapshot quota runs
+  out fast for an active monorepo with thousands of stories and frequent
+  pushes — budget for it as a real line item.
+- **False sense of coverage.** A component can have a beautifully
+  complete story set and still ship with a business-logic bug, because
+  stories don't exercise real data-fetching, routing, or app state on
+  purpose — that's out of scope by design, not a gap to fix.
+- **Interaction tests inside Storybook can outgrow the tool.** Once a
+  play function needs deep async mocking or checks that span multiple
+  pages, that's a sign to move the scenario into Playwright instead of
+  stretching Storybook to cover it (see
+  [Chapter 8](/chapters/testing-strategy)).
 
 ## Alternatives
 
@@ -462,109 +486,115 @@ catches versus what still requires a manual or screen-reader pass.
 | When to choose it | Multi-framework or large design system with a real design/eng review loop | React-only repo prioritizing raw dev-server speed over addon breadth | Vue-only design system | Documentation-heavy site where testing/visual-regression matter less | A handful of components, no cross-team review workflow |
 | When NOT to choose it | A 3-component internal tool with one maintainer | Need Chromatic-grade visual regression or the full addon catalog | Non-Vue stack | Need first-class interaction testing | More than a few components, or any external consumers |
 
-Most large, multi-team design system orgs standardize on Storybook itself
-rather than an alternative, and the reason is organizational as much as
-technical: Storybook's addon ecosystem (Chromatic, the a11y addon, the
-test runner, Figma embeds) is where the *integrations* other tools
-haven't matched yet, and a design system's value is disproportionately in
-those integrations — the review workflow, the CI gates, the docs
-generation — not in the raw story-rendering primitive, which every
-alternative in the table above does adequately. Ladle and Histoire earn
-their keep specifically when a team has already hit a real pain point with
-Storybook's dev-server startup time on a very large monorepo and doesn't
-need the addon ecosystem enough to justify the tradeoff; that's a genuine
-and increasingly common complaint at scale, but it's a minority case
-relative to teams who haven't outgrown Storybook's Vite builder.
+Most large, multi-team design system orgs stick with Storybook itself
+rather than switching to an alternative, and the reason is organizational
+as much as technical: Storybook's addon ecosystem (Chromatic, the a11y
+addon, the test runner, Figma embeds) is where the *integrations* other
+tools haven't matched yet. A design system's value comes disproportionately
+from those integrations — the review workflow, the CI gates, the docs
+generation — not from the raw story-rendering itself, which every
+alternative in the table above does well enough. Ladle and Histoire earn
+their keep specifically when a team has already hit a real pain point
+with Storybook's dev-server startup time on a very large monorepo and
+doesn't need the addon ecosystem enough to justify sticking with
+Storybook. That's a real and increasingly common complaint at scale, but
+it's still the minority case compared to teams who haven't outgrown
+Storybook's Vite builder.
 
 ## Tradeoffs
 
 The central tradeoff is **isolation vs. fidelity**. Every property that
 makes Storybook valuable — fast iteration, addressable states, no app
 dependency — comes from deliberately *not* running your real app around
-the component. That means anything the real app provides implicitly
+the component. That means anything the real app provides for free
 (routing context, a real data layer, real global CSS resets, real font
-loading) has to be explicitly reconstructed inside Storybook via
-decorators and mocks, and every one of those reconstructions is a place
-where Storybook's rendering can silently diverge from production
-rendering — a story can look perfect and the same component can still
-render subtly differently inside the actual app if a decorator's mock
-context doesn't match the real provider's behavior closely enough. Teams
-manage this by keeping decorators as thin and close to the real providers
-as possible (wrapping a real `ThemeProvider` with test data rather than a
-hand-rolled stand-in) and by treating Storybook as the primary surface for
+loading) has to be rebuilt inside Storybook using decorators and mocks.
+Every one of those rebuilds is a place where Storybook's rendering can
+quietly diverge from production rendering: a story can look perfect, and
+the same component can still render subtly differently inside the actual
+app, if a decorator's mock context doesn't match the real provider
+closely enough.
+
+Teams manage this by keeping decorators thin and close to the real
+providers — wrapping a real `ThemeProvider` with test data, instead of a
+hand-rolled stand-in — and by treating Storybook as the main surface for
 component-level correctness while still relying on integration/E2E tests
-for full-app fidelity — see [Chapter 8](/chapters/testing-strategy) for
+for full-app fidelity. See [Chapter 8](/chapters/testing-strategy) for
 where that boundary sits.
 
 ## Performance Considerations
 
-Storybook's build performance has two dimensions that matter separately.
-**Dev-server startup and HMR** scale with story count under the legacy
-Webpack builder because Webpack's dependency graph analysis is eager; the
-Vite builder (default since Storybook 7) uses native ESM and only compiles
-the story you're actually viewing, so startup time stays roughly flat as
-the story count grows into the thousands — this is the single biggest
-lever for keeping Storybook usable in a large monorepo, and migrating an
-old Webpack-based Storybook to the Vite builder is usually the first fix
-when "Storybook is slow" becomes a recurring complaint. **Chromatic build
-time** scales with the number of stories captured per push; teams manage
-this with **TurboSnap** (Chromatic's own dependency-aware feature that
+Storybook's build performance has two parts worth looking at separately.
+
+**Dev-server startup and hot reload** scale with story count under the
+older Webpack builder, because Webpack's dependency-graph analysis is
+eager (it processes everything up front). The Vite builder (default since
+Storybook 7) uses native ESM and only compiles the story you're actually
+viewing, so startup time stays roughly flat even as story count grows
+into the thousands. This is the single biggest lever for keeping
+Storybook usable in a large monorepo — migrating an old, Webpack-based
+Storybook to the Vite builder is usually the first fix when "Storybook is
+slow" becomes a recurring complaint.
+
+**Chromatic build time** scales with the number of stories captured per
+push. Teams manage this with **TurboSnap**, Chromatic's own feature that
 only re-snapshots stories whose source files actually changed since the
-last build, using the same kind of dependency graph reasoning covered in
-[Chapter 9](/chapters/monorepo-architecture)) rather than re-snapshotting
+last build (using the same kind of dependency-graph reasoning covered in
+[Chapter 9](/chapters/monorepo-architecture)), instead of re-snapshotting
 every story on every push.
 
 ## Scalability Considerations
 
-At a few hundred components and low thousands of stories, the main
-scalability risks are: story index build time (mitigated by the Vite
-builder), Chromatic snapshot volume and cost (mitigated by TurboSnap and
-scoping visual regression to changed packages only via
+At a few hundred components and low thousands of stories, the main risks
+are: story index build time (fixed by the Vite builder), Chromatic
+snapshot volume and cost (fixed by TurboSnap and scoping visual
+regression to changed packages only, via
 [monorepo](/chapters/monorepo-architecture) task graphs), and addon
-sprawl — every addon adds to both build time and cognitive overhead, so
-large orgs typically audit and prune their addon list on a cadence rather
-than accumulating every addon that looked useful at some point. Story
-*organization* also becomes a real scalability concern independent of
-tooling: without an enforced naming/`title` convention (e.g. mirroring the
-actual package/component directory structure), a sidebar with two thousand
-stories becomes unnavigable regardless of how fast the tool itself is —
-this is a governance problem as much as a technical one, and pairs with
-the contribution conventions covered in
+sprawl — every addon adds to both build time and mental overhead, so
+large orgs typically audit and prune their addon list on a schedule
+instead of keeping every addon that once looked useful.
+
+Story *organization* becomes a real scalability concern on its own, apart
+from tooling. Without an enforced naming/`title` convention (for example,
+mirroring the actual package/component folder structure), a sidebar with
+two thousand stories becomes unnavigable no matter how fast the tool
+itself runs. This is a governance problem as much as a technical one, and
+it connects to the contribution conventions covered in
 [Chapter 11](/chapters/governance).
 
 ## Common Mistakes
 
 <Callout type="danger" title="Treating Storybook as a substitute for real integration testing">
   A component can pass every story and interaction test in isolation and
-  still break when composed with real siblings inside the actual app —
-  Storybook deliberately doesn't exercise real routing, real data
-  fetching, or real global CSS. Teams that drop E2E/integration coverage
-  entirely because "Storybook passes" get burned by exactly this gap.
+  still break when it's combined with real siblings inside the actual
+  app. Storybook deliberately skips real routing, real data fetching, and
+  real global CSS. Teams that drop E2E/integration coverage entirely
+  because "Storybook passes" get burned by exactly this gap.
 </Callout>
 
 <Callout type="danger" title="Letting stories silently drift from real usage">
-  A story authored once and never revisited eventually stops representing
-  how the component is actually used in production once its props evolve.
-  Stories need the same code-review scrutiny as the component itself —
-  add or update a story in the same PR that changes the component's prop
-  surface, not as a follow-up.
+  A story written once and never revisited eventually stops matching how
+  the component is actually used in production, once its props change.
+  Stories need the same code-review attention as the component itself —
+  add or update a story in the same PR that changes the component's
+  props, not as a follow-up later.
 </Callout>
 
 <Callout type="danger" title="Auto-accepting Chromatic diffs to unblock a PR">
   The single most common way visual regression testing loses its value:
   under deadline pressure, a reviewer accepts a diff without actually
-  looking at it, which trains the whole team to treat visual regression
-  gates as a rubber stamp rather than a real check. If this becomes
-  routine, the gate is providing zero signal while still costing CI time
+  looking at it. That trains the whole team to treat the visual
+  regression gate as a rubber stamp instead of a real check. If this
+  becomes routine, the gate gives zero signal while still costing CI time
   and Chromatic snapshot budget.
 </Callout>
 
 <Callout type="danger" title="Overusing decorators to fake too much app context">
-  A decorator that reconstructs half the app's provider tree just to get
-  one story rendering is a sign the component itself has too many
-  implicit dependencies on ambient context — the fix is usually in the
-  component's API (accept the data as props, don't reach into a global
-  context), not in a heavier decorator. See
+  A decorator that rebuilds half the app's provider tree just to get one
+  story rendering is a sign the component itself depends on too much
+  hidden, ambient context. The fix is usually in the component's API
+  (accept the data as props, don't reach into a global context), not in a
+  heavier decorator. See
   [Chapter 3](/chapters/component-architecture) on state ownership.
 </Callout>
 
@@ -573,23 +603,24 @@ the contribution conventions covered in
 - **One story per meaningfully distinct state**, not one story per prop —
   a `size` prop with three values doesn't need three stories unless size
   interacts with something else worth reviewing separately.
-- **Keep the `Default` story argument-free** (or as close to it as
-  possible) so it always reflects the component's actual default props,
-  not a curated "nice-looking" configuration that masks what a consumer
-  gets for free.
+- **Keep the `Default` story argument-free** (or as close as possible) so
+  it always reflects the component's real default props, not a curated
+  "nice-looking" configuration that hides what a consumer actually gets
+  for free.
 - **Co-locate stories with the component** (`Button.tsx`,
-  `Button.stories.tsx`, `Button.test.tsx` in the same directory) so a
+  `Button.stories.tsx`, `Button.test.tsx` in the same folder) so a
   contributor updating the component sees the stories that need updating
   in the same file listing.
-- **Write play functions for keyboard and focus behavior specifically**
-  — this is the bug class unit tests and visual snapshots both miss, and
-  it's exactly the behavior a design system's consumers depend on most.
+- **Write play functions for keyboard and focus behavior specifically** —
+  this is the bug class that unit tests and visual snapshots both miss,
+  and it's exactly the behavior a design system's consumers depend on
+  most.
 - **Gate merges on both Chromatic and the a11y/test runner in CI**, not
   just on unit tests — visual and accessibility regressions are the
   failure modes most specific to a design system's job.
-- **Prune stale addons and stories on a cadence.** An addon or a story
+- **Prune stale addons and stories on a schedule.** An addon or a story
   nobody has looked at in a year is a maintenance cost with no offsetting
-  value; treat the story set as a living surface, not a write-once
+  value; treat the story set as a living thing, not a write-once
   artifact.
 
 ## Interview Questions
@@ -818,27 +849,30 @@ the contribution conventions covered in
 
 ## Summary
 
-Storybook exists to solve a specific, expensive problem: reaching and
-reviewing a component's full state matrix inside a real application is
-economically infeasible, which means edge cases silently go unreviewed.
-By rendering each state as an isolated, addressable story, Storybook
-removes that navigation tax and — because every downstream tool (Autodocs,
-Controls, Chromatic, the a11y addon, play functions) derives from the same
-story definitions — keeps docs, tests, and visual baselines from drifting
-independently the way separately maintained artifacts do. Component Driven
-Development is the methodology this enables: build and verify bottom-up,
-atoms before molecules before screens, mirroring a design system's own
-layered architecture. CSF3 made stories plain, statically analyzable
-objects; Autodocs and Controls derive directly from TypeScript types via
-`react-docgen`; play functions blur story and test by driving real DOM
-interactions with `@storybook/test`; Chromatic turns pixel-diffing into a
-CI gate instead of relying on human eyeballs; and the a11y addon runs
-axe-core automatically on every story, catching the mechanically checkable
-third of accessibility issues before a component ships. None of this
-replaces real integration or E2E testing — Storybook deliberately doesn't
-exercise routing, data fetching, or full app composition — which is why it
-occupies a specific, bounded layer of the test pyramid covered in depth in
-[Chapter 8](/chapters/testing-strategy).
+Storybook exists to solve one specific, expensive problem: reaching and
+reviewing a component's full range of states inside a real application is
+too costly to do in practice, so edge cases silently go unreviewed. By
+rendering each state as its own addressable story, Storybook removes that
+navigation tax. Because every other tool (Autodocs, Controls, Chromatic,
+the a11y addon, play functions) reads from the same story files, docs,
+tests, and visual baselines can't drift apart the way separately
+maintained artifacts do.
+
+Component Driven Development is the approach this enables: build and
+check bottom-up, atoms before molecules before screens, mirroring a
+design system's own layered structure. CSF3 made stories plain,
+statically readable objects. Autodocs and Controls both come from reading
+TypeScript types via `react-docgen`. Play functions blur story and test by
+driving real DOM interactions with `@storybook/test`. Chromatic turns
+pixel-diffing into a CI gate instead of relying on human eyeballs. And the
+a11y addon runs axe-core automatically on every story, catching the
+mechanically checkable third of accessibility issues before a component
+ships.
+
+None of this replaces real integration or E2E testing — Storybook
+deliberately doesn't exercise routing, data fetching, or full app
+composition — which is why it occupies a specific, bounded layer of the
+test pyramid covered in depth in [Chapter 8](/chapters/testing-strategy).
 
 **Key takeaways**
 
@@ -857,3 +891,4 @@ occupies a specific, bounded layer of the test pyramid covered in depth in
   auto-accepting diffs defeats its purpose.
 - Storybook is not a substitute for integration/E2E testing; it isolates
   one specific, bounded layer of the pyramid.
+

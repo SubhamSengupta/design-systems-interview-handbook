@@ -6,145 +6,178 @@ export const metadata = {
 
 # 13. Performance
 
+## Quick Glance
+
+- Design system performance means controlling what a component library costs every app that uses it: bundle size, render CPU, memory, and CSS work.
+- The core problem is multiplication: one wasteful component times fifty consuming teams equals fifty apps getting slower at once.
+- Barrel files (an `index.ts` that re-exports everything) are the single most common real-world tree-shaking killer — fix with per-component subpath exports in `package.json`.
+- `React.lazy` + `Suspense` defer heavy, rarely-used components (a rich text editor, a date picker) so their weight isn't in everyone's initial bundle.
+- Runtime CSS-in-JS injects styles during render, which gets expensive on high-repeat leaf components (Badge in a 500-row table); zero-runtime CSS (Vanilla Extract, Panda CSS) generates that CSS at build time instead.
+- Context re-renders every consumer when the Provider's value changes identity — not just the consumers that read the changed field. Split Context by how often each piece of state changes.
+- `React.memo` plus stable, primitive props stops leaf components (Badge, Cell) from re-rendering needlessly in lists — verify the fix with the React DevTools Profiler, don't just assume it worked.
+- Virtualize lists once they get into the thousands of rows; under a couple hundred rows, virtualization usually isn't worth the extra complexity.
+- Tooltip and Popover are the most common source of memory leaks — always pair listeners/portals added on mount with cleanup in `useEffect`.
+- Enforce bundle budgets in CI per component, not as one number for the whole library, so a regression is easy to trace to its cause.
+
 ## Definition
 
-**Design system performance** is the discipline of controlling the cost a
-component library imposes on every application that consumes it — bundle
-bytes shipped over the wire, CPU spent on render and re-render, memory held
-by long-lived widgets, and CSS work paid on every paint. It spans two
-distinct surfaces that most teams conflate: performance of the *package
-itself* (how it's built, what it exports, how much of it tree-shakes away)
-and performance of the *components at runtime* (how they render, re-render,
-and clean up inside a real application with real data volumes). A design
-system that is "fast" only in its own Storybook but slow inside a 500-row
-data table in a consumer app has not solved the problem it exists to solve.
+**Design system performance** means controlling the cost a component
+library places on every app that uses it. That cost shows up in four ways:
+bundle bytes sent over the network, CPU spent rendering and re-rendering,
+memory held by long-lived widgets, and CSS work paid on every paint.
+
+There are two different surfaces here, and teams often mix them up:
+
+- **The package itself** — how it's built, what it exports, and how much
+  of it can be removed (tree-shaken) by a consumer's bundler when unused.
+- **The components at runtime** — how they render, re-render, and clean up
+  inside a real app handling real amounts of data.
+
+A design system that looks "fast" only in its own Storybook, but turns
+slow inside a consumer's 500-row data table, has not actually solved the
+problem it exists to solve.
 
 ## Problem Statement
 
-Every other engineering team at a company writes code that affects *their*
-app. A design system team writes code that affects *every* app. That
-asymmetry is the whole problem. If a product engineer adds a 40kb dependency
-to a feature page, one page gets 40kb heavier. If a design system engineer
-adds the same dependency inside a `<DatePicker>` that fifty consuming teams
-import, and that import isn't isolated behind a code-split boundary, fifty
-apps get 40kb heavier — and the design system team, sitting upstream of all
-of them, usually has no idea it happened until someone notices Lighthouse
-scores dropping three sprints later.
+Every other engineering team writes code that affects *their own* app. A
+design system team writes code that affects *every* app that uses it.
+That difference is the whole problem.
 
-The same asymmetry shows up at runtime. A `<Badge>` or `<Icon>` component is
-the kind of thing nobody profiles, because in isolation it renders in
-under a millisecond. But design systems don't ship components in isolation
-— they ship components that get dropped into data tables, virtualized
-lists, and dashboards where the same leaf component might render five
-hundred or five thousand times on a single screen. A component that is
-individually cheap becomes collectively expensive the moment it's used at
-the scale a design system is *built* for. This is the central inversion of
-this chapter: design system performance work is not about making any one
-component fast, it's about making the multiplication safe.
+If a product engineer adds a 40kb dependency to one feature page, that one
+page gets 40kb heavier. If a design system engineer adds the same
+dependency inside a `<DatePicker>` that fifty teams import — and nothing
+isolates that import behind a code-split boundary — all fifty apps get
+40kb heavier at once. Worse, the design system team usually has no idea
+this happened until someone notices Lighthouse scores dropping weeks
+later.
+
+The same multiplication happens at runtime. Nobody profiles a `<Badge>` or
+`<Icon>` component on its own, because by itself it renders in under a
+millisecond. But design systems don't ship components in isolation — they
+ship components that get dropped into data tables and dashboards, where
+the same small component might render five hundred or five thousand times
+on one screen. A component that's cheap on its own becomes expensive the
+moment it's used at the scale a design system is built for.
+
+This is the central idea of this chapter: design system performance work
+isn't about making one component fast. It's about making the
+multiplication safe.
 
 ## Why Does This Exist?
 
-Performance engineering became a first-class design-system discipline
-because three things happened roughly together industry-wide:
+Performance work became a core design-system discipline because three
+things happened at roughly the same time, across the industry:
 
-1. **Design systems succeeded at their actual job.** Once a design system
-   is adopted broadly — Polaris across every Shopify admin surface, Carbon
-   across every IBM Cloud console, an internal system across forty product
-   squads — every kilobyte and every wasted render in a shared primitive is
-   now paid by every one of those surfaces, simultaneously. Success
-   converts "small inefficiency" into "systemic tax."
-2. **JavaScript bundle sizes became a boardroom metric.** As React
-   applications grew, the industry converged on Core Web Vitals (LCP, INP,
-   CLS) as things Google search ranking, ecommerce conversion rate, and
-   internal tool adoption all correlate with. A design system sits directly
-   upstream of a consuming app's Time to Interactive, whether the DS team
-   thinks about it or not.
-3. **CSS-in-JS's runtime cost became visible at scale.** Libraries like the
-   original `styled-components` runtime made authoring ergonomic but paid
-   for it with style recalculation on every render — invisible on a
-   component demo page, very visible on a page rendering a thousand styled
-   nodes. This is the direct historical driver behind the industry's move
-   toward zero-runtime CSS, covered in depth in
+1. **Design systems succeeded at their real job: getting reused.** Once a
+   design system is adopted broadly — Polaris across every Shopify admin
+   screen, Carbon across every IBM Cloud console, an internal system across
+   forty product teams — every wasted kilobyte and every wasted render in a
+   shared component is now paid by all of those teams at once. Success
+   turns a small inefficiency into a tax the whole company pays.
+2. **JavaScript bundle size became a metric leadership cares about.** As
+   React apps grew, the industry settled on Core Web Vitals (LCP, INP, CLS
+   — three metrics Google uses to score page speed) as numbers that track
+   with search ranking, ecommerce sales, and how often people use an
+   internal tool. A design system sits directly upstream of how fast a
+   consuming app becomes usable, whether the design system team thinks
+   about it or not.
+3. **CSS-in-JS's runtime cost became visible at scale.** CSS-in-JS means
+   writing CSS inside your JavaScript/component file instead of a separate
+   `.css` file. Early libraries like the original `styled-components` made
+   this easy to write, but paid for it by recalculating styles on every
+   render — invisible on a demo page with three components, very visible
+   on a real page with a thousand styled elements. This is the direct
+   reason the industry moved toward zero-runtime CSS (CSS generated ahead
+   of time instead of during render), covered in depth in
    [Styling Architecture](/chapters/styling-architecture).
 
-Performance work in a design system, in other words, exists because the
-system's entire value proposition — reuse — is also its entire performance
-risk. Reuse is a force multiplier in both directions.
+In short: a design system's whole value is reuse. But reuse is also its
+whole performance risk — the same multiplier that makes it valuable makes
+mistakes expensive.
 
 ## Historical Context
 
-Early component libraries (roughly 2015–2018, the jQuery-UI-to-React
-transition era) shipped as a single monolithic bundle: one script tag, one
-`dist/bundle.js`, every component always included whether you used three of
-them or thirty. Tree shaking wasn't yet reliable — Babel-transpiled CommonJS
-modules can't be statically analyzed for dead code the way ES modules can —
-so "importing one component" usually meant "downloading the whole library."
+Early component libraries (roughly 2015–2018, when teams were moving from
+jQuery UI to React) shipped as one big bundle: one script tag, one
+`dist/bundle.js` file, every component included whether you used three of
+them or thirty. Tree shaking — the process of a bundler automatically
+deleting code you don't use — wasn't reliable yet. Babel-transpiled
+CommonJS modules (an older module format) can't be scanned for unused code
+the way modern ES modules can. So "importing one component" usually meant
+"downloading the whole library" anyway.
 
-The shift to ES modules (`import`/`export`) as the standard authoring and
-publishing format, combined with bundlers gaining static analysis
-capability (Rollup pioneered this, Webpack 2 followed with `sideEffects`
-support in 2017, esbuild and Vite's Rollup-based build later made it the
-default expectation), made per-component tree shaking practical. Design
-systems responded by restructuring their package layout around it — this is
-covered from the packaging side in
-[Packaging](/chapters/packaging) and revisited here from the *consumer's*
-side, which is where tree shaking actually succeeds or fails.
+Two things changed that. First, the industry moved to ES modules
+(`import`/`export`) as the standard way to write and publish packages.
+Second, bundlers gained the ability to statically analyze that code —
+Rollup pioneered it, Webpack 2 added `sideEffects` support in 2017, and
+esbuild and Vite later made this the default expectation. Together, these
+made tree shaking work reliably at the individual-component level. Design
+systems restructured their packages around it. [Packaging](/chapters/packaging)
+covers how a design system builds for this; this chapter covers it from
+the consumer's side, which is where tree shaking actually succeeds or
+fails.
 
-CSS-in-JS had its own arc. `styled-components` (2016) and Emotion (2017)
-made co-locating styles with components dramatically more ergonomic than
-hand-maintained CSS Modules, and design systems adopted them heavily through
-the late 2010s. By the early 2020s, teams running these libraries at scale
-(large marketing sites, data-dense admin tools) started publishing profiling
-data showing runtime style injection as a measurable chunk of render time,
-which drove the rise of zero-runtime alternatives — Vanilla Extract (2021),
-Panda CSS (2023) — that do the same authoring-time colocation but compile to
-static CSS ahead of time.
+CSS-in-JS followed its own path. `styled-components` (2016) and Emotion
+(2017) made it much easier to keep styles next to the component they
+belonged to, and design systems adopted them widely through the late
+2010s. By the early 2020s, teams running these libraries on large,
+data-heavy pages started publishing profiling data showing that injecting
+styles at runtime was eating a measurable chunk of render time. That
+finding drove the rise of zero-runtime alternatives — Vanilla Extract
+(2021) and Panda CSS (2023) — which keep the same "styles next to the
+component" convenience but compile everything to plain CSS ahead of time.
 
-Virtualization tooling followed a similar maturation curve:
-`react-virtualized` (2016) was the first widely adopted solution but shipped
-as one large, opinionated package covering grids, lists, and tables with a
-sizeable API surface. `react-window` (2019, same author, deliberately
-smaller) stripped it down to a lean primitive. TanStack Virtual (2023,
-successor to `react-virtual`) went further and became headless and
-framework-agnostic, giving a design system full control over markup and
-styling while TanStack owns only the windowing math. Design systems today
-typically build their virtualized `<List>`/`<Table>` primitive on top of one
-of these rather than hand-rolling viewport math.
+Virtualization tooling (libraries that only render the rows currently
+visible on screen, instead of every row) went through a similar
+maturing process. `react-virtualized` (2016) was the first widely used
+option, but it was one large package covering grids, lists, and tables
+with a big API surface. `react-window` (2019, same author, deliberately
+smaller) stripped that down to a lean, focused tool. TanStack Virtual
+(2023, successor to `react-virtual`) went further still: it's headless
+(it only handles the math of which rows are visible, and hands you full
+control over the markup and styling) and works outside React too. Most
+design systems today build their virtualized `<List>`/`<Table>` on top of
+one of these rather than writing the scroll-position math themselves.
 
-Bundle budget tooling followed the same trajectory as linting: `bundlesize`
-(2016) was the first popular "fail CI if the bundle grows" tool; `size-limit`
-(2018) generalized it with pluggable checks (including actual runtime
-execution time, not just byte count); `bundlewatch` added GitHub PR
-commenting with per-file diffs. By the early 2020s, gating PRs on a
-component-level gzip budget was standard practice at design-system-mature
-companies, the same way gating on test coverage had become standard a
+Bundle budget tooling — tools that fail a build if the bundle gets too big
+— followed the same path as linting tools before it. `bundlesize` (2016)
+was the first popular "fail CI if the bundle grows" tool. `size-limit`
+(2018) added more checks, including actual run time, not just file size.
+`bundlewatch` added automatic PR comments showing the size difference per
+file. By the early 2020s, checking a component's gzip (compressed) size on
+every pull request was standard practice at companies with mature design
+systems — the same way requiring test coverage had become standard a
 decade earlier.
 
 ## How It Works Internally
 
 ### Tree shaking from the consumer's side, precisely
 
-[Packaging](/chapters/packaging) covers how a design system *authors* its
-build to be tree-shakeable. Here's what actually happens on the *consumer's*
-bundler when they write:
+[Packaging](/chapters/packaging) covers how a design system *builds* its
+package to be tree-shakeable (able to have unused code deleted). Here's
+what actually happens on the *consumer's* bundler when a consumer writes:
 
 ```ts
 import { Button } from "@acme/ui";
 ```
 
-The consumer's bundler (webpack, Rollup, esbuild, whatever their app uses)
-performs static analysis on the ES module graph rooted at that import. It
-asks: which exports of `@acme/ui` are actually referenced, and can the
-modules that produce the *unreferenced* exports be proven side-effect-free
-and therefore safely deleted? If yes, dead code elimination removes them
-from the final bundle. If the bundler cannot prove that, it keeps them —
-"maybe used" is treated as "used," because deleting code that runs a
-side effect (e.g., a module-scope `document.body.classList.add(...)`, or a
-CSS-in-JS library injecting a stylesheet at import time) would change
-runtime behavior, and a bundler will never risk that silently.
+The consumer's bundler (webpack, Rollup, esbuild — whatever their app
+uses) scans the chain of ES modules starting from that import. For each
+export in `@acme/ui`, it asks two questions: is this export actually used
+anywhere, and if not, can the code that produces it be proven safe to
+delete? "Safe to delete" means the module has no side effects — it
+doesn't do anything the moment it runs, beyond producing the export. If
+the answer is yes, the bundler deletes that code (this is called dead
+code elimination). If the bundler *can't* prove it's safe, it keeps the
+code anyway. "Maybe used" gets treated as "used." Deleting code that
+actually does something when it loads — like a line that runs
+`document.body.classList.add(...)`, or a CSS-in-JS library that injects a
+stylesheet the moment it's imported — would change how the app behaves.
+No bundler will risk that silently.
 
-This is exactly where **barrel files** — an `index.ts` that re-exports
-every component from one place —  quietly defeat the whole mechanism:
+This is exactly where **barrel files** quietly break the whole mechanism.
+A barrel file is an `index.ts` that re-exports every component from one
+place:
 
 ```ts
 // packages/ui/src/index.ts — the barrel
@@ -155,31 +188,33 @@ export * from "./Badge";
 // ...120 more components
 ```
 
-A consumer writing `import { Button } from "@acme/ui"` is, from the
-bundler's point of view, importing from the *barrel module*, not from
-`Button.tsx` directly. To tree-shake away `DatePicker` and
-`RichTextEditor`, the bundler has to prove that evaluating those modules
-has no observable side effects. In practice this frequently fails, for a
-few concrete reasons:
+When a consumer writes `import { Button } from "@acme/ui"`, the bundler
+sees this as an import from the *barrel file*, not from `Button.tsx`
+directly. To delete `DatePicker` and `RichTextEditor` from the final
+bundle, the bundler needs proof that loading those modules has no side
+effects. In practice, that proof fails often, for a few concrete reasons:
 
-- **CommonJS interop.** If any dependency in the chain (a lot of npm
-  packages still ship CJS, or dual-format packages get resolved to their
-  CJS build under certain conditions) is not a real ES module, static
-  analysis can't see through it at all — the whole subgraph is included.
-- **The `sideEffects` field is missing or wrong.** Without an accurate
-  `"sideEffects": false` (or an accurate array of the files that *do* have
-  side effects) in `package.json`, most bundlers default to the
-  conservative assumption that any module might have side effects, and
-  keep it.
-- **Component-level module side effects.** A component file that registers
-  something in a module-scope side effect (icon registries, CSS-in-JS
-  `injectGlobal`, analytics auto-instrumentation) is, correctly, not safe
-  to drop — but that correctness spreads to everything else re-exported
-  from the same barrel if the bundler can't isolate it per-file.
+- **CommonJS interop.** CommonJS (CJS) is an older module format that
+  can't be scanned the way modern ES modules can. If any package in the
+  chain still ships CJS — and a lot of npm packages do — the bundler
+  can't see through it, and includes the whole thing.
+- **The `sideEffects` field is missing or wrong.** `package.json` can
+  declare `"sideEffects": false` to tell the bundler "nothing in this
+  package does anything just by loading — it's safe to delete unused
+  parts." Without an accurate version of this field, most bundlers
+  assume the opposite (that any module might have side effects) and keep
+  everything.
+- **A component itself has a side effect.** A component file that
+  registers something the moment it loads — an icon registry, a CSS-in-JS
+  `injectGlobal` call, auto-wired analytics — genuinely isn't safe to
+  delete. That's correct on its own. But when it's re-exported from the
+  same barrel as everything else, and the bundler can't isolate it to
+  just that one file, the "not safe to delete" label spreads to every
+  other export in the barrel too.
 
-The fix is structural, not a bundler flag: **give every component its own
-importable subpath**, so a consumer's import statement points directly at
-the module they need, with no barrel in between.
+The fix isn't a bundler setting — it's a structural change: **give every
+component its own importable subpath**, so a consumer's import statement
+points straight at the module they need, with no barrel file in between.
 
 ```json
 // packages/ui/package.json
@@ -206,26 +241,27 @@ the module they need, with no barrel in between.
 import { Button } from "@acme/ui/button";
 ```
 
-Now there is no ambiguity for the bundler to resolve: `@acme/ui/button`
-*is* the Button module, full stop. Nothing from `DatePicker` or
-`RichTextEditor` is even parsed, let alone included. Some design systems
-additionally keep a convenience barrel for DX (`import { Button } from
-"@acme/ui"`) — that's fine *as long as* the barrel itself only re-exports
-already-side-effect-free modules and the `sideEffects: false` claim is
-actually true, which is worth a CI check (see
-[Packaging](/chapters/packaging) for `publint`/`are-the-types-wrong`-style
-validation), because a false claim silently strips code your components
-actually need at runtime.
+Now there's no ambiguity for the bundler to work out: `@acme/ui/button`
+*is* the Button module, nothing more. Nothing from `DatePicker` or
+`RichTextEditor` is even read, let alone included in the bundle. Some
+design systems still keep a convenience barrel too, so `import { Button }
+from "@acme/ui"` also works — that's fine, as long as the barrel only
+re-exports modules that are genuinely free of side effects, and the
+`sideEffects: false` claim in `package.json` is actually true. Worth
+checking this in CI (see [Packaging](/chapters/packaging) for tools like
+`publint` and `are-the-types-wrong`), because a false claim there will
+silently strip code your components actually need at runtime.
 
 ### Lazy loading and code splitting
 
-Some components are expensive but rarely rendered on first paint — a
-`<DatePicker>` behind a "pick a date" button a user might never click this
-session, or a `<RichTextEditor>` that only mounts once someone opens a
-comment box. Shipping their full weight in the initial bundle taxes every
-page load to benefit a page interaction that may never happen. `React.lazy`
-combined with `Suspense` defers the download until the component is
-actually about to render:
+Some components cost a lot but rarely get rendered on the first screen a
+user sees — a `<DatePicker>` behind a "pick a date" button someone might
+never click this session, or a `<RichTextEditor>` that only mounts once
+someone opens a comment box. Shipping their full weight in the initial
+bundle makes every page load slower, to benefit an interaction that might
+never happen. `React.lazy` combined with `Suspense` fixes this: it delays
+downloading the component's code until the component is actually about to
+render.
 
 ```tsx
 import { lazy, Suspense } from "react";
@@ -247,82 +283,92 @@ export function CommentBox() {
 }
 ```
 
-The design-system-specific nuance: a *consumer* of your library decides
-when a heavy component is worth lazy-loading in their app, but you as the
-DS author decide whether it's even *possible* — if `RichTextEditor` and
-`Button` are both exported from one non-code-split module graph, no amount
-of consumer-side `React.lazy` wrapping saves them from paying for
-`RichTextEditor`'s dependencies, because they're statically bundled
-together upstream. Subpath exports (above) are the enabling structure;
-`React.lazy` is what a consumer layers on top of it.
+There's one design-system-specific catch: a *consumer* of your library
+decides when a heavy component is worth lazy-loading in their app, but you
+as the design system author decide whether that's even *possible*. If
+`RichTextEditor` and `Button` are both exported from one module graph that
+isn't split apart, no amount of `React.lazy` wrapping on the consumer's
+side saves them from `RichTextEditor`'s dependencies — those are already
+bundled together upstream, before the consumer's code even runs. Subpath
+exports (from the previous section) are what make lazy loading possible in
+the first place; `React.lazy` is what a consumer adds on top of that.
 
 ### CSS performance: runtime injection vs static extraction
 
 [Styling Architecture](/chapters/styling-architecture) covers the full
-landscape of CSS approaches; the performance-specific mechanism is this.
-Runtime CSS-in-JS libraries generate class names and inject `<style>` rules
-*during* render — the first time a given prop combination is seen, the
-library serializes styles to a string, hashes it to a class name, and calls
-something equivalent to `styleSheet.insertRule()`. That insertion forces
-the browser to invalidate its cached style computations for the affected
-subtree, which the browser then has to redo. On a single Button that's
-unmeasurable. In a table body rendering five hundred `<Badge variant={...}>`
-cells where `variant` varies per row, if the library isn't caching
-per-variant output correctly, you can end up paying that recalculation cost
-hundreds of times per render pass.
+landscape of CSS approaches. Here's the specific mechanism behind the
+performance difference.
 
-Static/zero-runtime CSS (Vanilla Extract, Panda CSS, or plain CSS Modules
-with token-driven CSS variables) sidesteps this entirely: class names and
-their rules are generated at *build time*. At runtime, applying a class name
-to an element is just a DOM attribute write — the browser already has the
-rule parsed and cached, no injection, no recompute-on-first-use cost. This
-is the single biggest reason design systems built for high-density,
-data-heavy surfaces (admin tools, data tables, dashboards) have converged on
-zero-runtime CSS over the last several years.
+Runtime CSS-in-JS libraries generate class names and inject `<style>`
+rules *while the page renders*. The first time a given combination of
+props is seen, the library turns the styles into a string, hashes that
+string into a class name, and inserts a new CSS rule into the page. That
+insertion forces the browser to throw away cached style calculations for
+the affected part of the page and redo them. On a single Button, this cost
+is too small to notice. But in a table rendering five hundred
+`<Badge variant={...}>` cells, where `variant` is different per row, a
+library that doesn't cache each variant's output correctly ends up paying
+that recalculation cost hundreds of times in one render.
 
-The second CSS performance axis is **selector cost at cascade scale**. A
-selector like `.Table .Row .Cell.active .Badge` requires the browser to walk
-right-to-left through the DOM tree checking each compound condition on every
-style recalculation; deeply nested, high-specificity selectors get more
-expensive to match as the DOM grows. Design systems that emit
-low-specificity, flat class selectors (one class per component, no nesting)
-avoid this by construction. **Cascade layers** (`@layer`) help here too,
-independent of the specificity story covered in
-[Styling Architecture](/chapters/styling-architecture): layers let you keep
-every rule at low, flat specificity — because layer *order* resolves
-precedence instead of selector complexity — which keeps the browser's
-selector-matching cost bounded even as the design system's stylesheet grows
-into the thousands of rules.
+Static, zero-runtime CSS (Vanilla Extract, Panda CSS, or plain CSS Modules
+using token-driven CSS variables) avoids this entirely. Class names and
+their rules are generated once, at build time — before the app ever runs.
+At runtime, applying a class name to an element is just writing an
+attribute; the browser already has the rule parsed and ready. No
+injection, no first-use recalculation cost. This is the main reason
+design systems built for data-heavy screens — admin tools, data tables,
+dashboards — have moved to zero-runtime CSS over the last few years.
+
+The second performance factor in CSS is **how expensive a selector is to
+match**. A selector like `.Table .Row .Cell.active .Badge` makes the
+browser walk backward through several conditions, checking each one,
+every time it recalculates styles. Deeply nested, highly specific
+selectors get more expensive as the page grows. Design systems that use
+flat, low-specificity selectors — one class per component, no nesting —
+avoid this problem from the start. **Cascade layers** (`@layer`, a CSS
+feature for grouping rules and controlling which group wins) help too,
+separately from the specificity story covered in
+[Styling Architecture](/chapters/styling-architecture): layers let every
+rule stay simple and flat, because the *order of the layers* decides which
+rule wins instead of how specific each selector is. That keeps the
+browser's matching cost predictable even as the stylesheet grows into the
+thousands of rules.
 
 ### Rendering performance: the leaf-component-in-a-list problem
 
-React re-renders a component whenever its parent re-renders, unless that
-component is memoized *and* its props are referentially stable. A
-`<Badge>` inside a table row looks trivial in isolation, but consider what
-happens when a table with a search input re-renders on every keystroke: if
-`Badge` isn't wrapped in `React.memo`, every one of the five hundred `Badge`
-instances in that table re-renders on every keystroke too, even though
-`Badge`'s own props (a status string, a color) never changed. This is a
-real, extremely common design-system bug class, and it's why profiling
-matters more here than almost anywhere else in the codebase — it doesn't
-show up until a component gets used at production data volume.
+React re-renders a component whenever its parent re-renders — unless that
+component is memoized (told to skip re-rendering when its inputs haven't
+changed) and its props stay the same reference between renders. A
+`<Badge>` inside a table row looks harmless on its own, but think about
+what happens when a table with a search box re-renders on every keystroke.
+If `Badge` isn't wrapped in `React.memo`, all five hundred `Badge`
+instances in that table re-render on every keystroke too — even though
+none of their actual data (a status string, a color) changed. This is a
+common, real bug in design systems, and it's why profiling (measuring
+what's actually slow, instead of guessing) matters so much here: the
+problem doesn't show up until a component is used at real production
+scale.
 
-The tool for catching it is the **React DevTools Profiler**: record a
-render pass (typing into that search box, say), and look at the flame graph
-for a "commit" that shows five hundred `Badge` bars lit up when the
-underlying badge data didn't change. The Profiler's "why did this render"
-panel (available via the `<Profiler onRender>` API or the DevTools ranked
-view) will point at "parent re-rendered, props unchanged" as the cause,
-which is the specific signature memoization exists to eliminate.
+The tool for catching it is the **React DevTools Profiler**. Record a
+render (type into that search box, for example), then look at the flame
+graph — a visual breakdown of what rendered — for a "commit" (one render
+pass) that lights up five hundred `Badge` bars, even though the badge data
+never changed. The Profiler's "why did this render" panel will name the
+cause: "parent re-rendered, props unchanged." That's exactly the pattern
+memoization is built to fix.
 
 ### Context optimization, deepened
 
-[React Architecture](/chapters/react-architecture) introduces Context
-splitting; the performance-specific detail is about **value identity**.
+[React Architecture](/chapters/react-architecture) introduces the idea of
+splitting Context into smaller pieces. Here's the specific detail that
+makes it matter for performance: **value identity**.
+
 Every component that calls `useContext(MyContext)` re-renders whenever the
-*value* passed to `MyContext.Provider` changes identity — not when the
-specific field a component reads changes, when the *whole object* the
-provider passes gets a new reference. This trips people up constantly:
+value passed to `MyContext.Provider` changes identity — meaning React sees
+a new object reference, not the old one. This happens regardless of which
+specific field inside that object a component actually reads; it's the
+*whole object's* identity that matters, not any one field. This trips
+people up constantly:
 
 ```tsx
 // Anti-pattern: a brand-new object every render means every consumer
@@ -342,53 +388,56 @@ function TableProvider({ children }: { children: ReactNode }) {
 }
 ```
 
-`selectedIds` changes on nearly every user interaction (checking a row);
+`selectedIds` changes on almost every user action (checking a row).
 `sortColumn` changes rarely. Bundled into one context value, a component
-that only cares about the sort column re-renders on every row selection.
-The fix is to split state that changes at different *frequencies* into
-separate contexts, so a consumer only subscribes to the churn rate it
-actually needs — worked in full in the Implementation Example below.
+that only cares about the sort column re-renders every time a row gets
+checked. The fix is to split state that changes at different speeds into
+separate contexts, so each consumer only subscribes to the rate of change
+it actually needs — worked in full in the Implementation Example below.
 
 ### Virtualization mechanism
 
-A `<Table>` with ten thousand rows, rendered naively, creates ten thousand
-real DOM nodes — most of them scrolled out of view and invisible, but the
-browser still has to lay them out, paint them (if not clipped), and hold
-them in memory. Virtualization (windowing) renders only the DOM nodes for
-rows currently inside (plus a small overscan buffer around) the visible
-viewport, and uses a spacer/transform to make the scrollbar behave as if
-all ten thousand rows existed. Concretely: the library measures (or
-estimates) each row's height, computes which row indices fall inside
-`[scrollTop, scrollTop + viewportHeight]`, renders only those rows
-absolutely positioned (via `transform: translateY(...)`) at their correct
-offset, and adjusts a single tall spacer element so the total scrollable
-height matches what the full, unvirtualized list would have been. As the
-user scrolls, the library recomputes the visible index range and swaps
-which rows are actually mounted — old rows unmount, new ones mount, DOM
-node count stays roughly constant regardless of total row count.
+A `<Table>` with ten thousand rows, rendered the naive way, creates ten
+thousand real DOM nodes. Most of them are scrolled out of view and
+invisible, but the browser still has to lay them out, paint them (if not
+clipped), and hold them in memory. Virtualization — also called windowing
+— fixes this by rendering only the DOM nodes for rows currently inside the
+visible area (plus a small buffer around it), and using a spacer element
+to make the scrollbar behave as if all ten thousand rows were really
+there.
+
+Concretely, here's what the library does: it measures (or estimates) each
+row's height, works out which row numbers fall inside the visible area,
+and renders only those rows, positioning each one at its correct offset
+using `transform: translateY(...)`. A single tall spacer element keeps the
+total scrollable height the same as it would be if every row were really
+rendered. As the user scrolls, the library recalculates which rows are
+visible and swaps them in and out — old rows unmount, new ones mount — so
+the number of DOM nodes stays roughly constant no matter how many total
+rows there are.
 
 ### Memory usage: cleanup in mount/unmount-heavy components
 
 `<Tooltip>` and `<Popover>` are the components most likely to leak memory
-in a design system, because they typically (a) attach a global event
-listener (mousemove, scroll, resize, or an outside-click listener) and (b)
-render into a portal — a DOM node outside the component's own React tree.
-If the listener isn't removed and the portal node isn't cleaned up when the
-component unmounts, every Tooltip a user has ever hovered over during a
-session accumulates a dangling listener and orphaned DOM node, which is
-exactly the shape of leak that shows up as an app slowing down over a long
-session rather than crashing outright. The fix is a `useEffect` cleanup
-function that mirrors every subscription made on mount — worked in full
-below, and verified in Chrome DevTools by taking two heap snapshots (before
-and after repeatedly opening/closing a hundred tooltips) and diffing
-retained object counts; a healthy component shows the count return to
-baseline, a leaking one shows it climb monotonically.
+in a design system. That's because they typically do two things: attach a
+global event listener (for mousemove, scroll, resize, or clicking outside)
+and render into a portal — a DOM node placed outside the component's own
+position in the React tree. If the listener isn't removed and the portal
+node isn't deleted when the component unmounts, every Tooltip a user has
+ever hovered over in a session leaves behind a dangling listener and an
+orphaned DOM node. This is exactly the kind of leak that shows up as "the
+app gets sluggish over a long session" rather than a clean crash. The fix
+is a `useEffect` cleanup function that undoes everything the effect set
+up. This is worked out in full below, and you can verify it in Chrome
+DevTools: take a heap snapshot, open and close a hundred tooltips, take a
+second snapshot, and compare the retained object counts. A healthy
+component returns to its starting count; a leaking one keeps climbing.
 
 ## Architecture
 
-The diagram below places every technique in this chapter at the specific
-point in the pipeline — from source code to a rendered, scrolled,
-long-lived screen — where it intervenes.
+The diagram below shows where each technique in this chapter steps in,
+following the path from source code to a screen that's rendered, scrolled,
+and stays open for a while.
 
 ```mermaid
 graph TD
@@ -406,54 +455,55 @@ graph TD
   K -->|"listener + portal cleanup on unmount"| K
 ```
 
-Reading it left to right: tree shaking and code splitting act *before* a
-byte reaches the browser. Static CSS and initial-render memoization act at
-*first paint*. Context splitting and `React.memo` act on every
-*subsequent* re-render. Virtualization acts on *DOM node count* once a list
-is showing real production data volume. Memory cleanup acts across the
-*whole lifetime* of a session, independent of any single render. Treating
-these as one undifferentiated "performance" bucket is a mistake — each one
-requires a different technique, a different profiling tool, and fails
-silently in a different way.
+Reading it left to right: tree shaking and code splitting happen *before*
+a single byte reaches the browser. Static CSS and initial-render
+memoization act at *first paint*. Context splitting and `React.memo` act
+on every *later* re-render. Virtualization controls *DOM node count* once
+a list is showing real production data. Memory cleanup acts across the
+*whole lifetime* of a session, not tied to any one render. Treating all of
+this as one undifferentiated "performance" bucket is a mistake — each
+piece needs a different technique, a different profiling tool, and fails
+silently in its own way.
 
 ## Real-World Example
 
-Data-dense admin surfaces are where every technique in this chapter earns
-its keep simultaneously, and it's worth walking through a composite,
-realistic scenario that mirrors what teams running large order/issue/ticket
-tables (the kind of surface Shopify's admin, Atlassian's Jira, and similar
-enterprise tools all have) routinely run into.
+Data-dense admin screens are where every technique in this chapter earns
+its keep at the same time. It's worth walking through a realistic,
+composite scenario that mirrors what teams running large order, issue, or
+ticket tables — the kind of screen Shopify's admin, Atlassian's Jira, and
+similar enterprise tools all have — routinely run into.
 
 A design system ships a `<Table>` built from `<Row>`, `<Cell>`, and
 `<Badge>` primitives. A consuming team renders an order list with two
-thousand rows, each with a status `Badge`. Three independent problems
-compound:
+thousand rows, each with a status `Badge`. Three separate problems stack
+on top of each other:
 
-1. The table has a live search box wired directly to the same component
-   tree as the rows (no debouncing, no isolation) — every keystroke
-   re-renders the whole tree, and because `Badge` isn't memoized, two
-   thousand `Badge` re-renders fire on every character typed. React DevTools
-   Profiler shows this immediately as a wide, uniform band of two thousand
-   near-identical bars on every commit.
-2. All two thousand rows are mounted as real DOM nodes at once (no
-   virtualization), so beyond the re-render cost, the browser is also
-   holding two thousand rows in layout and paint — scrolling itself becomes
-   janky independent of any React work.
-3. Each `Badge`'s color mapping is computed inline
+1. The table has a live search box wired directly into the same component
+   tree as the rows, with no debouncing (delaying the search until typing
+   pauses) and no isolation. Every keystroke re-renders the whole tree, and
+   because `Badge` isn't memoized, two thousand `Badge` re-renders fire on
+   every character typed. The React DevTools Profiler shows this
+   immediately: a wide, uniform band of two thousand near-identical bars on
+   every commit.
+2. All two thousand rows are mounted as real DOM nodes at once — no
+   virtualization. So beyond the re-render cost, the browser is also
+   holding two thousand rows in layout and paint. Scrolling itself gets
+   janky, independent of any React work.
+3. Each `Badge`'s color is computed inline
    (`style={{ background: STATUS_COLORS[status] }}`) using a runtime
-   CSS-in-JS call rather than a static class, so each of those two thousand
-   renders also pays a style-injection cost on top of the reconciliation
-   cost.
+   CSS-in-JS call instead of a pre-built class. So each of those two
+   thousand renders also pays a style-injection cost on top of the
+   re-render cost.
 
-The fix compounds in the same order the problems do: memoize `Badge` so an
-unrelated search-box re-render doesn't cascade into it; virtualize the row
-list with a TanStack Virtual–backed `<Table>` primitive so only ~20–30 rows
-are ever mounted regardless of total row count; and move `Badge`'s color
-mapping to a static, token-driven CSS class instead of a runtime style
-object. None of the three fixes alone gets the table back to 60fps
-scrolling and sub-16ms keystroke response — it's the composition of all
-three, because each one addresses a different cost that adds when the other
-two are present.
+The fix addresses the problems in the same order they stack: memoize
+`Badge` so a search-box re-render doesn't cascade into it; virtualize the
+row list with a TanStack Virtual–backed `<Table>` primitive so only about
+20–30 rows are ever mounted no matter the total row count; and move
+`Badge`'s color to a static, token-driven CSS class instead of a runtime
+style object. No single one of these three fixes alone gets the table back
+to smooth 60fps scrolling and fast keystroke response — it takes all
+three together, because each one removes a different cost, and those
+costs add up when left together.
 
 ## Implementation Example
 
@@ -502,11 +552,11 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-A PR that adds `date-fns` as an unguarded default import to `DatePicker`
-now fails CI with a specific, attributable diff — `@acme/ui/date-picker: 8
-KB → 33 KB (+25 KB)` — before it ever merges, rather than showing up as an
-unexplained regression in a consuming app's Lighthouse score three sprints
-later.
+If a pull request adds `date-fns` as an unguarded import to `DatePicker`,
+CI now fails with a clear, specific diff — `@acme/ui/date-picker: 8 KB →
+33 KB (+25 KB)` — before it ever merges. That's much better than the
+alternative: an unexplained drop in a consuming app's Lighthouse score
+weeks later, with no obvious cause.
 
 ### 2. Subpath exports fixing the barrel-file tree-shaking failure
 
@@ -732,14 +782,14 @@ export function VirtualizedTable({ rows }: { rows: Row[] }) {
 ```
 
 <Callout type="warning" title="Virtualization and accessibility don't come free">
-  A virtualized list only has a handful of rows in the DOM at any moment,
-  which means screen readers relying on `aria-rowcount`/`aria-rowindex`
-  need those attributes kept accurate as rows mount and unmount, and
-  keyboard navigation (Home/End/PageDown) needs to programmatically scroll
-  the virtualizer *and* move focus, not just one or the other. See
-  [Accessibility](/chapters/accessibility) for the full pattern — treat
-  virtualization as an accessibility feature to build, not a performance
-  feature that happens to also need accessibility bolted on after.
+  A virtualized list only has a handful of rows in the DOM at any moment.
+  That means screen readers, which rely on `aria-rowcount`/`aria-rowindex`
+  to announce position, need those values kept accurate as rows mount and
+  unmount. It also means keyboard navigation (Home/End/PageDown) has to
+  both scroll the virtualizer *and* move focus — not just one of the two.
+  See [Accessibility](/chapters/accessibility) for the full pattern. Build
+  virtualization as an accessibility feature from the start, not a
+  performance feature you bolt accessibility onto afterward.
 </Callout>
 
 ### 7. Cleanup in a portal-based Tooltip
@@ -787,61 +837,62 @@ export function useTooltip() {
 }
 ```
 
-Verifying this actually works is a DevTools exercise, not a code-review
-guess: open Chrome DevTools → Memory → take a heap snapshot, programmatically
-open and close a Tooltip a hundred times, force a GC, take a second
-snapshot, and diff retained object counts filtered to the component's
-constructor name. A correct implementation returns to baseline; a leaking
-one shows the count climbing linearly with open/close cycles.
+Don't just guess this works from reading the code — check it in DevTools.
+Open Chrome DevTools → Memory, take a heap snapshot, open and close a
+Tooltip a hundred times programmatically, force garbage collection, then
+take a second snapshot. Compare the retained object counts for the
+component's constructor name. A correct implementation returns to its
+starting count. A leaking one climbs steadily with every open/close
+cycle.
 
 ## Advantages
 
-- **Compounding savings.** A 5kb reduction in a component used by forty
-  consuming apps is a 200kb aggregate saving across the org — the same
-  multiplier that makes DS performance bugs expensive makes DS performance
-  fixes disproportionately valuable.
-- **Regressions caught upstream.** CI-enforced budgets catch a bloat-causing
-  dependency before it ships, rather than relying on forty separate app
-  teams each independently noticing and reporting a slowdown.
-- **One virtualization implementation, correctly accessible, instead of
-  forty.** Consuming teams get a working windowed table without each
-  reinventing viewport math and its accessibility pitfalls.
+- **Savings compound.** A 5kb cut in a component used by forty consuming
+  apps saves 200kb total across the company. The same multiplier that
+  makes performance bugs expensive makes performance fixes worth
+  disproportionately more.
+- **Regressions get caught upstream.** CI-enforced budgets catch a
+  bloated dependency before it ships, instead of relying on forty
+  separate app teams to each notice and report the same slowdown.
+- **One correct, accessible virtualization instead of forty broken
+  ones.** Consuming teams get a working windowed table without each one
+  having to reinvent scroll-position math and its accessibility pitfalls.
 - **Credibility.** A design system that visibly performs well under real
-  data volume earns adoption faster than one that only looks good in a
-  three-row Storybook example — this is a genuine adoption lever, not just
-  an engineering nicety (see [Governance](/chapters/governance) on adoption
+  data earns faster adoption than one that only looks good in a
+  three-row Storybook demo. This is a real adoption lever, not just an
+  engineering nicety (see [Governance](/chapters/governance) on adoption
   strategy).
 
 ## Disadvantages
 
-- **CI budget maintenance is its own ongoing cost.** Budgets need
-  revisiting as legitimate feature growth happens; a stale, too-tight
-  budget generates false-positive failures that erode trust in the check
-  and get overridden, defeating its purpose.
-- **Virtualization adds real complexity.** Dynamic row heights, sticky
-  headers, and accessible keyboard navigation are all harder inside a
-  virtualized container than a plain DOM list; smaller consuming teams
-  sometimes reasonably opt out for lists that will never exceed a few
-  hundred rows.
+- **Maintaining CI budgets is its own ongoing cost.** Budgets need
+  revisiting as features legitimately grow. A stale, too-tight budget
+  causes false failures, which erodes trust in the check and gets it
+  overridden — defeating its purpose.
+- **Virtualization adds real complexity.** Rows with different heights,
+  sticky headers, and accessible keyboard navigation are all harder
+  inside a virtualized list than a plain one. Smaller teams with lists
+  that will never exceed a few hundred rows can reasonably skip it.
 - **Aggressive memoization has its own cost.** `React.memo`'s comparison
-  isn't free — over-applying it to components with naturally unstable
-  props (a new object literal every render, for example) adds a
-  comparison cost on every render *without* preventing the re-render it
-  was meant to prevent, which is strictly worse than no memoization.
-- **Premature optimization risk.** Building a fully virtualized,
-  context-split, lazy-loaded component before any consumer has hit the
-  scale that requires it is wasted engineering effort the org pays for
-  immediately in exchange for a benefit that may never materialize.
+  step isn't free. Over-applying it to components with naturally
+  unstable props — a new object literal on every render, for example —
+  adds a comparison cost on every render *without* stopping the
+  re-render it was meant to prevent. That's worse than no memoization at
+  all.
+- **Premature optimization is a real risk.** Building a fully
+  virtualized, context-split, lazy-loaded component before any consumer
+  needs that scale is wasted effort — the cost is paid immediately, for
+  a benefit that might never show up.
 
 ## Alternatives
 
-Virtualization is the clearest case in this chapter where a design system
-has several credible library choices, each trading off differently. Below
-is the comparison; the same ten-dimension format applies if you're
-evaluating bundle-budget tooling (size-limit vs. bundlewatch vs.
-bundlesize) or CSS approaches, both covered in
+Virtualization is the clearest case in this chapter where a design
+system has several good library choices, each with different tradeoffs.
+The table below compares them. The same ten-dimension format applies if
+you're comparing bundle-budget tools (size-limit vs. bundlewatch vs.
+bundlesize) or CSS approaches — both covered in
 [Styling Architecture](/chapters/styling-architecture) and
-[Packaging](/chapters/packaging) respectively.
+[Packaging](/chapters/packaging).
 
 | Dimension | react-window | react-virtualized | TanStack Virtual | No virtualization + CSS `content-visibility` |
 | --- | --- | --- | --- | --- |
@@ -856,407 +907,420 @@ bundlesize) or CSS approaches, both covered in
 | When to choose it | Standard fixed or estimable-height lists/tables | Legacy codebases already using it, or need its specific sticky-grid features | New builds wanting full control of markup/a11y, or non-React targets | Lists too small to justify a dependency but large enough that paint cost matters |
 | When NOT to choose it | Highly irregular row heights without measurement | New projects — react-window/TanStack Virtual supersede it | Teams wanting a batteries-included component, not a primitive | Any list needing true DOM-count reduction (huge lists, memory-constrained devices) |
 
-Large product companies overwhelmingly build their design system's
-`<List>`/`<Table>` primitive on **react-window or TanStack Virtual** rather
-than `react-virtualized`, because a design system's whole job is to hand
-consumers a *small, controlled* API surface — react-virtualized's larger
-surface area works against that goal even though it's capable of more.
-Teams that adopted design systems more recently (2023+) lean toward
-**TanStack Virtual specifically because it's headless**: a design system
-already owns markup and styling (that's the point of the system), so a
-virtualization library that tries to also own markup, the way
-react-virtualized partially does, is fighting the design system rather than
-serving it. `content-visibility: auto` is not a substitute for either — it
-doesn't reduce DOM node count or memory, only paint/layout cost — but it's
-a legitimate, dependency-free choice for lists that are long enough to want
-*some* browser help but not long enough (low thousands of rows) to justify
-committing to a virtualization primitive and its accessibility overhead.
+Large product companies mostly build their design system's `<List>`/
+`<Table>` primitive on **react-window or TanStack Virtual**, not
+`react-virtualized`. A design system's whole job is to hand consumers a
+*small, controlled* API — react-virtualized's larger surface area works
+against that goal, even though it can do more. Teams that adopted design
+systems more recently (2023 onward) lean toward **TanStack Virtual
+specifically because it's headless** (meaning it only handles the
+windowing math, not the markup). A design system already owns its own
+markup and styling — that's the whole point of the system — so a
+virtualization library that also tries to own markup, the way
+react-virtualized partly does, works against the design system instead
+of helping it. `content-visibility: auto` isn't a real substitute for
+either one — it doesn't cut DOM node count or memory, only paint and
+layout cost — but it's a fine, dependency-free choice for lists long
+enough to want some browser help, without being long enough (low
+thousands of rows) to justify a full virtualization library and its
+accessibility overhead.
 
 ## Tradeoffs
 
-Every technique in this chapter trades something for its performance gain,
-and stating the gain without the cost is how a design system ends up with
-performance work nobody wants to maintain:
+Every technique in this chapter trades something for its performance
+gain. Stating the gain without the cost is how a design system ends up
+with performance work nobody wants to maintain:
 
-- **Budget strictness vs. shipping velocity.** A tight CI budget catches
-  real regressions but also blocks legitimate growth (a new required a11y
-  feature that adds 300 bytes); budgets need a documented process for
-  raising them deliberately, not just failing silently forever.
+- **Budget strictness vs. shipping speed.** A tight CI budget catches
+  real regressions, but it also blocks legitimate growth — like a new
+  required accessibility feature that adds 300 bytes. Budgets need a
+  documented process for raising them on purpose, not just failing
+  forever.
 - **Lazy loading vs. perceived latency.** Deferring `RichTextEditor`'s
-  chunk until it's rendered saves everyone who never opens it, but costs
-  the person who *does* open it a network round-trip they wouldn't have
-  paid with eager loading — mitigated with a skeleton, not eliminated.
-- **Virtualization vs. implementation complexity and accessibility risk.**
-  Windowing a table is a real engineering investment with real ongoing
-  a11y obligations (see the callout above); a consuming team with 200 rows
-  and never more is rationally better off with a plain, unvirtualized list.
+  code until it's rendered saves everyone who never opens it. But it
+  costs the person who *does* open it a network round-trip they wouldn't
+  have paid with eager loading. A skeleton screen softens this; it
+  doesn't remove it.
+- **Virtualization vs. complexity and accessibility risk.** Windowing a
+  table is a real engineering investment with ongoing accessibility work
+  (see the callout above). A team with 200 rows, and never more, is
+  better off with a plain, unvirtualized list.
 - **Memoization vs. comparison overhead.** `React.memo` isn't free to
-  evaluate; applying it to every leaf component indiscriminately adds a
-  shallow-compare cost across the tree even where re-renders were already
-  cheap, which is a net loss on components that render rarely or trivially.
+  run. Applying it to every leaf component without thinking adds a
+  comparison cost across the whole tree, even where re-renders were
+  already cheap. That's a net loss on components that render rarely or
+  trivially.
 - **Zero-runtime CSS vs. authoring flexibility.** Static CSS extraction
-  requires compile-time knowledge of every style permutation, which is a
-  real constraint compared to runtime CSS-in-JS's ability to interpolate
-  arbitrary JS values into styles at render time — see
+  needs to know every style variant at build time. That's a real
+  constraint compared to runtime CSS-in-JS, which can plug in any
+  JavaScript value while rendering. See
   [Styling Architecture](/chapters/styling-architecture) for the full
   tradeoff.
 
 ## Performance Considerations
 
-Concrete numbers a design system team should be tracking, not vague
-aspiration:
+Concrete numbers a design system team should track, not vague goals:
 
-- **Per-component gzip budgets.** Core primitives (`Button`, `Badge`,
-  `Icon`) should sit in the low single-digit kilobytes gzipped; composite
-  components (`DataTable`, `DatePicker`) can budget higher (5–15kb) but
-  should still be individually tracked, not lumped into one whole-library
-  number that hides which component is responsible for growth.
-- **Re-render count, not just render time.** A component rendering in
-  0.1ms five thousand times unnecessarily costs more aggregate frame time
-  than a component rendering in 5ms once — track *count* via the Profiler's
-  commit view, not only per-render duration.
+- **Per-component gzip budgets.** Gzip is a compression format; "gzip
+  size" is the size actually sent over the network. Core primitives
+  (`Button`, `Badge`, `Icon`) should sit in the low single-digit
+  kilobytes gzipped. Composite components (`DataTable`, `DatePicker`) can
+  budget higher (5–15kb), but should still be tracked individually — not
+  lumped into one whole-library number that hides which component caused
+  the growth.
+- **Re-render count, not just render time.** A component that renders in
+  0.1ms but does so five thousand times unnecessarily costs more total
+  frame time than a component that renders once in 5ms. Track *count*
+  through the Profiler's commit view, not just how long each render
+  takes.
 - **Virtualization threshold.** As a rule of thumb, lists under roughly
-  100–200 DOM nodes rarely need virtualization; the engineering and
-  accessibility cost outweighs the benefit below that. Past that, windowing
-  becomes worth the investment, and past a few thousand rows it becomes
-  close to mandatory for acceptable scroll performance.
-- **CSS injection count in CSS-in-JS setups.** If still using a runtime
-  CSS-in-JS library, watch for the specific pathology of unbounded class
-  generation — dynamic style values (arbitrary numbers, not a closed set of
-  variants) generate a new class on every unique value seen, which can
-  leak both memory (the style cache) and injected rule count over a long
-  session.
+  100–200 DOM nodes rarely need virtualization — the engineering and
+  accessibility cost outweighs the benefit below that. Past that,
+  windowing becomes worth it, and past a few thousand rows it's close to
+  required for the scrolling to feel smooth.
+- **CSS injection count in CSS-in-JS setups.** If you're still using a
+  runtime CSS-in-JS library, watch for unbounded class generation: when
+  style values are arbitrary numbers instead of a fixed set of variants,
+  the library creates a new class for every unique value it sees. Over a
+  long session this can leak memory (in the style cache) and keep adding
+  injected rules.
 
 ## Scalability Considerations
 
-As a design system grows from a handful of components to hundreds, and from
-a handful of consuming teams to dozens, performance work has to move from
-one-off audits to standing infrastructure:
+As a design system grows from a handful of components to hundreds, and
+from a handful of consuming teams to dozens, performance work has to move
+from one-off checks to permanent infrastructure:
 
-- **Historical budget dashboards**, not just pass/fail CI gates — a
-  dashboard tracking each component's gzip size over time surfaces slow,
-  incremental creep (a 200-byte regression every month for a year) that a
-  single-PR budget check would never catch on its own.
-- **Virtualization becomes a first-class primitive, not a recipe.** At
-  small scale, "here's how to virtualize a list" can live in documentation.
-  At scale, with dozens of teams building tables independently, the design
-  system needs to *ship* the virtualized `<Table>` itself — otherwise every
-  team reinvents (and mis-implements) windowing and its accessibility
-  requirements independently.
-- **Context-splitting patterns need enforcement, not just guidance.** A
-  lint rule flagging a Context provider whose `value` prop is a fresh
-  object literal (no `useMemo`) catches the mistake at the point it's
-  introduced, which scales far better than relying on code review to catch
-  it in every PR across every team touching shared state.
-- **Memory leak detection needs to be automated**, not manual DevTools
-  sessions run occasionally — a CI step that mounts/unmounts a component
-  N times in a headless browser and asserts DOM node count / listener count
-  returns to baseline catches leak regressions the same way a snapshot test
-  catches visual regressions.
+- **Historical budget dashboards**, not just pass/fail CI checks. A
+  dashboard tracking each component's gzip size over time catches slow,
+  gradual growth — a 200-byte regression every month for a year — that a
+  single pull request's budget check would never catch by itself.
+- **Virtualization becomes a built-in primitive, not a recipe to copy.**
+  At small scale, "here's how to virtualize a list" can live in a doc
+  page. At scale, with dozens of teams building tables on their own, the
+  design system needs to *ship* the virtualized `<Table>` itself.
+  Otherwise every team rebuilds — and likely gets wrong — windowing and
+  its accessibility requirements on their own.
+- **Context-splitting needs enforcement, not just guidance.** A lint rule
+  that flags a Context provider whose `value` prop is a fresh object
+  literal (missing `useMemo`) catches the mistake right when it's
+  introduced. That scales much better than relying on code review to
+  catch it in every pull request, from every team, touching shared
+  state.
+- **Memory leak detection needs to be automated**, not run manually in
+  DevTools now and then. A CI step that mounts and unmounts a component
+  many times in a headless browser, then checks that DOM node count and
+  listener count return to baseline, catches leak regressions the same
+  way a snapshot test catches visual regressions.
 
 ## Common Mistakes
 
 <Callout type="danger" title="Re-exporting everything through one barrel index.ts">
   This is the single most common tree-shaking killer in design system
-  packages. It feels like good DX ("one import path for everything") but
-  silently defeats dead code elimination for every consumer, every time,
-  unless every re-exported module is provably side-effect-free — which in
-  practice it rarely is. Use per-component subpath exports as the primary
-  import path.
+  packages. It feels like good developer experience ("one import path for
+  everything"), but it silently defeats dead code elimination for every
+  consumer, every time — unless every re-exported module can be proven
+  free of side effects, which in practice it rarely can. Use
+  per-component subpath exports as the primary import path instead.
 </Callout>
 
 <Callout type="danger" title="Passing inline object or function literals as props to a memoized component">
   `<Badge style={{ color: "red" }} />` or `<Row onSelect={() => select(id)}
-  />` creates a new reference every render, which defeats `React.memo`'s
-  shallow comparison completely — the memoized component re-renders every
-  time regardless, but now also pays the comparison cost. Hoist the value
-  with `useMemo`/`useCallback`, or restructure the prop to be a primitive.
+  />` creates a new reference every render. That completely defeats
+  `React.memo`'s shallow comparison — the memoized component re-renders
+  every time anyway, but now also pays the comparison cost on top. Hoist
+  the value with `useMemo`/`useCallback`, or change the prop to a
+  primitive value instead.
 </Callout>
 
 <Callout type="danger" title="Forgetting listener/portal cleanup in mount-heavy components">
   A Tooltip or Popover that adds a window listener or creates a portal DOM
-  node on mount, without a matching `useEffect` cleanup, leaks one of each
-  per open/close cycle. In a long user session this compounds into a
-  measurable, hard-to-diagnose slowdown that looks like "the app gets
-  sluggish over time" rather than an obvious crash.
+  node on mount, without a matching `useEffect` cleanup, leaks one of
+  each on every open/close cycle. Over a long user session this adds up
+  to a measurable, hard-to-diagnose slowdown — it looks like "the app
+  gets sluggish over time" rather than an obvious crash.
 </Callout>
 
 <Callout type="danger" title="Virtualizing before you know the container's real height">
-  Rendering a virtualizer before its scroll container has a measured height
-  (e.g., during SSR or before layout settles) produces an incorrect
-  visible-row calculation and a visible layout jump once real measurements
-  land. Gate virtualization on a stable, measured container, or provide an
-  explicit fixed height up front.
+  Rendering a virtualizer before its scroll container has a measured
+  height — during server rendering, or before layout settles — produces
+  a wrong visible-row calculation and a visible jump once real
+  measurements arrive. Only start virtualizing once the container has a
+  stable, measured height, or give it an explicit fixed height up front.
 </Callout>
 
 <Callout type="danger" title="Enforcing the same bundle budget on every package indiscriminately">
-  A flat "500 bytes max regression" rule applied to both `Icon` (should
-  genuinely almost never grow) and `DataTable` (legitimately grows as
-  features are added) generates constant false-positive friction on the
-  component that's supposed to grow, training the team to routinely
-  override the check — which defeats it everywhere, including on the
-  components where it actually matters.
+  A flat "500 bytes max regression" rule applied to both `Icon` (which
+  should almost never grow) and `DataTable` (which legitimately grows as
+  features are added) creates constant false alarms on the component
+  that's supposed to grow. That trains the team to routinely override the
+  check — which defeats it everywhere, including on the components where
+  it actually matters.
 </Callout>
 
 ## Best Practices
 
-- Structure the package around per-component subpath exports as the
-  primary, documented import path; treat any convenience barrel as a
-  secondary, audited surface, not the default.
+- Make per-component subpath exports the main, documented way to import
+  from the package. Treat any convenience barrel as a secondary, checked
+  surface, not the default.
 - Enforce bundle budgets in CI at the *individual component* level, with
-  budgets set per-component based on its actual role, not one blanket
+  each component's budget set for its actual role — not one blanket
   number for the whole library.
 - Ship a lazy-loading wrapper for genuinely heavy, optionally-rendered
-  components (rich text editors, complex date pickers) so consumers get
-  code splitting without having to implement it themselves.
-- Default to static/zero-runtime CSS for high-cardinality leaf components
-  (badges, icons, table cells) where the same component renders hundreds
-  of times per screen.
+  components (rich text editors, complex date pickers), so consumers get
+  code splitting for free instead of having to build it themselves.
+- Default to static, zero-runtime CSS for leaf components that render
+  hundreds of times per screen (badges, icons, table cells).
 - Memoize leaf components used inside lists and tables by default, and
-  design their prop APIs around primitives specifically so that
-  memoization can actually succeed.
-- Split Context by *change frequency*, not just by logical grouping —
-  frequently-changing state and stable actions/config belong in separate
-  providers even when they're conceptually related.
+  design their props around primitive values specifically so memoization
+  actually works.
+- Split Context by *how often it changes*, not just by logical grouping —
+  fast-changing state and stable actions/config belong in separate
+  providers, even when they're conceptually related.
 - Ship virtualization as a built-in `<Table>`/`<List>` primitive once any
-  consumer approaches list sizes in the low thousands, rather than leaving
-  every team to hand-roll it.
-- Pair every `useEffect` that subscribes to something (listener, portal,
-  timer, observer) with a cleanup function in the same effect, and verify
-  it with an automated mount/unmount stress test, not just code review.
+  consumer's list gets into the low thousands of rows, instead of leaving
+  every team to build it themselves.
+- Pair every `useEffect` that subscribes to something (a listener, a
+  portal, a timer, an observer) with a cleanup function in the same
+  effect, and check it with an automated mount/unmount stress test — not
+  just code review.
 
 ## Interview Questions
 
 <InterviewQuestion q="Why does a barrel file (index.ts re-exporting everything) hurt tree shaking, mechanically?">
   **What the interviewer is testing:** Whether you understand *why* tree
-  shaking fails here, not just that it does — the mechanism, not the
-  folklore.
+  shaking fails here — the actual mechanism, not just the folklore that
+  "barrels are bad."
 
   **Poor answer:** "Barrel files are bad for bundle size."
 
   **Good answer:** Explains that importing from a barrel routes through a
-  module the bundler must statically prove is side-effect-free before it
-  can drop unused exports, and that proof frequently fails.
+  module the bundler must prove is free of side effects before it can drop
+  unused exports — and that this proof fails often.
 
   **Excellent senior answer:** All of the above, plus names the specific
-  failure modes — CJS interop breaking static analysis, missing/incorrect
-  `sideEffects` field, module-scope side effects in unrelated re-exported
-  files — and states the concrete fix (per-component subpath exports via
-  the `package.json` `exports` map), not just "avoid barrels."
+  failure modes: CJS interop breaking static analysis, a missing or wrong
+  `sideEffects` field, and side effects in unrelated files re-exported from
+  the same barrel. States the concrete fix — per-component subpath exports
+  via the `package.json` `exports` map — not just "avoid barrels."
 
-  **Common mistakes:** Treating it as a bundler bug rather than a
-  fundamental limit of static analysis; not knowing the `sideEffects`
-  field exists or what it does.
+  **Common mistakes:** Treating it as a bundler bug rather than a real
+  limit of static analysis; not knowing the `sideEffects` field exists or
+  what it does.
 </InterviewQuestion>
 
 <InterviewQuestion q="A design system's Badge component is re-rendering 500 times when a user types in an unrelated search box. Walk me through how you'd diagnose and fix it.">
   **What the interviewer is testing:** Practical profiling skill, not just
-  theoretical knowledge of `React.memo`.
+  textbook knowledge of `React.memo`.
 
   **Poor answer:** "Wrap it in React.memo."
 
   **Good answer:** Describes using the React DevTools Profiler to confirm
-  the re-render cascade and its cause (parent re-render, unmemoized child),
-  then applying `React.memo`.
+  the re-render cascade and its cause (parent re-rendered, child wasn't
+  memoized), then applying `React.memo`.
 
-  **Excellent senior answer:** Adds the crucial follow-up — memo alone
-  doesn't help if the parent passes unstable props (inline object/function
-  literals), so they'd also check the props Badge receives and hoist any
+  **Excellent senior answer:** Adds the crucial follow-up: memo alone
+  doesn't help if the parent passes unstable props (an inline object or
+  function). So they'd also check what props Badge receives and hoist any
   non-primitive ones with `useMemo`/`useCallback`, then re-profile to
-  confirm the fix actually reduced the commit's render count, not just
-  assume it worked.
+  confirm the fix actually cut the render count — not just assume it
+  worked.
 
-  **Excellent senior answer (continued):** Notes this is a sufficiently
-  common pattern in design systems specifically that leaf components used
-  in lists should default to accepting primitive props and being memoized,
-  rather than fixing it reactively per incident.
+  **Excellent senior answer (continued):** Notes this pattern is common
+  enough in design systems that leaf components used in lists should
+  default to primitive props and memoization from the start, instead of
+  fixing it one incident at a time.
 
   **Common mistakes:** Applying `React.memo` without checking prop
-  stability and declaring victory without re-profiling.
+  stability, and declaring victory without re-profiling.
 </InterviewQuestion>
 
 <InterviewQuestion q="When would you NOT virtualize a list, even though you have the tooling available?">
   **What the interviewer is testing:** Judgment about when an optimization
-  isn't worth its cost — not just knowledge that the optimization exists.
+  isn't worth its cost — not just knowing that the optimization exists.
 
   **Poor answer:** "Virtualization is always good for lists."
 
   **Good answer:** States that small lists (under a couple hundred rows)
-  don't need it — the DOM/paint cost is negligible and virtualization adds
+  don't need it — the DOM and paint cost is small, and virtualization adds
   real complexity.
 
-  **Excellent senior answer:** Names the specific added costs that make it
-  a real tradeoff, not a free win — dynamic row height measurement,
-  keyboard navigation and screen reader `aria-rowindex` bookkeeping, sticky
-  header interaction — and states that below the threshold where those
-  costs matter, a plain list is the better engineering choice.
+  **Excellent senior answer:** Names the specific added costs that make
+  this a real tradeoff, not a free win: measuring dynamic row heights,
+  keyboard navigation, keeping screen-reader `aria-rowindex` values
+  accurate, sticky headers. States that below the point where those costs
+  matter, a plain list is the better engineering choice.
 
-  **Common mistakes:** Presenting virtualization as strictly better with no
-  downside; not mentioning the accessibility implications at all.
+  **Common mistakes:** Presenting virtualization as always better with no
+  downside; not mentioning the accessibility cost at all.
 </InterviewQuestion>
 
 <InterviewQuestion q="Explain the performance difference between runtime CSS-in-JS and zero-runtime CSS, and why it matters more for a design system than a typical app.">
   **What the interviewer is testing:** Understanding of the actual
-  mechanism (style injection cost) and the multiplier argument specific to
-  design systems.
+  mechanism (the cost of injecting styles) and why it multiplies more in a
+  design system.
 
   **Poor answer:** "Zero-runtime CSS is faster."
 
-  **Good answer:** Explains that runtime CSS-in-JS injects styles during
-  render (cost paid per unique style combination seen), while zero-runtime
-  CSS is generated at build time (cost paid once, at build).
+  **Good answer:** Explains that runtime CSS-in-JS inserts styles while the
+  page renders — a cost paid for every unique combination of styles seen —
+  while zero-runtime CSS is generated once, at build time.
 
-  **Excellent senior answer:** Ties it to the design-system-specific
-  amplifier — a leaf component like Badge rendered hundreds of times per
-  screen pays the injection cost hundreds of times if not cached correctly,
-  which a typical one-off app component never encounters at that
-  cardinality — and cites this as the real driver behind the industry
-  move toward Vanilla Extract/Panda CSS in high-density UI, cross-referring
-  to [Styling Architecture](/chapters/styling-architecture).
+  **Excellent senior answer:** Connects it to the design-system-specific
+  multiplier: a leaf component like Badge, rendered hundreds of times per
+  screen, pays the injection cost hundreds of times if it isn't cached
+  correctly — something a typical one-off app component never hits at that
+  scale. Names this as the real reason the industry moved toward Vanilla
+  Extract and Panda CSS for high-density UI, and links it to
+  [Styling Architecture](/chapters/styling-architecture).
 
-  **Common mistakes:** Treating this as a purely stylistic/DX preference
-  rather than a measurable runtime cost difference.
+  **Common mistakes:** Treating this as a purely stylistic preference
+  instead of a measurable runtime cost difference.
 </InterviewQuestion>
 
 <InterviewQuestion q="How would you set and enforce a bundle size budget for a design system, and what would make you change it?">
-  **What the interviewer is testing:** Whether you can operationalize a
-  performance goal into process, not just state that budgets are good.
+  **What the interviewer is testing:** Whether you can turn a performance
+  goal into a real process, not just say "budgets are good."
 
   **Poor answer:** "I'd add a size check to CI."
 
-  **Good answer:** Describes per-component budgets (e.g. via size-limit) in
-  a PR-gating CI check, sized to each component's actual role.
+  **Good answer:** Describes per-component budgets (using a tool like
+  size-limit) in a CI check that blocks the pull request, sized to each
+  component's actual role.
 
-  **Excellent senior answer:** Adds that budgets need differentiated
-  thresholds (a stricter budget on `Icon` than on `DataTable`), a
+  **Excellent senior answer:** Adds that budgets need different
+  thresholds per component (stricter on `Icon` than on `DataTable`), a
   documented process for deliberately raising a budget when growth is
-  legitimate, and a historical dashboard to catch slow creep that no single
-  PR-level check would flag — and connects this to the trust cost of a
-  too-strict budget causing teams to routinely override it.
+  legitimate, and a historical dashboard to catch slow creep that no
+  single pull-request check would flag. Connects this to the trust cost of
+  a too-strict budget — teams start routinely overriding it.
 
-  **Common mistakes:** Proposing one flat budget for the entire library;
-  not accounting for legitimate growth needing a raise process.
+  **Common mistakes:** Proposing one flat budget for the whole library; not
+  accounting for a process to raise it when growth is legitimate.
 </InterviewQuestion>
 
 <InterviewQuestion q="What's the difference between Context re-rendering a consumer and a component actually needing to update?">
-  **What the interviewer is testing:** Precise understanding of Context's
-  subscription model, deepened from the general React Architecture
-  discussion into the performance-specific implication.
+  **What the interviewer is testing:** Precise understanding of how
+  Context decides who re-renders, building on the general
+  React Architecture discussion but focused on the performance angle.
 
   **Poor answer:** "Context causes re-renders."
 
   **Good answer:** Explains that any consumer of a Context re-renders when
-  the *value passed to the Provider* changes identity, regardless of which
+  the value passed to the Provider changes identity — no matter which
   field of that value the consumer actually reads.
 
-  **Excellent senior answer:** Gives the fix — splitting a single Context
-  into multiple contexts partitioned by change frequency, so a component
-  that only reads a rarely-changing field (like a stable action/setter)
-  subscribes to a Context that itself rarely changes — and notes the
-  `useMemo`-wrapped provider value is necessary but not sufficient without
-  that split, referencing [React Architecture](/chapters/react-architecture)
-  for the base pattern.
+  **Excellent senior answer:** Gives the fix: split one Context into
+  multiple contexts, grouped by how often each piece of state changes.
+  That way a component reading a rarely-changing field (like a stable
+  setter) subscribes to a Context that itself rarely changes. Notes that
+  wrapping the provider value in `useMemo` is necessary but not enough
+  without that split, referencing
+  [React Architecture](/chapters/react-architecture) for the base pattern.
 
   **Common mistakes:** Assuming `useMemo` on the Provider's value alone
-  solves the fan-out problem without also splitting by frequency.
+  solves the problem, without also splitting by change frequency.
 </InterviewQuestion>
 
 ## Manager-Level Questions
 
 <ManagerQuestion q="A consuming team says your design system component is 'slow.' How do you approach the conversation and the investigation?">
-  **What the interviewer is testing:** Whether you treat this as a
-  collaborative diagnostic problem or get defensive/dismissive.
+  **What the interviewer is testing:** Whether you treat this as a shared,
+  fact-finding problem or get defensive.
 
   **Poor answer:** "I'd ask them to send a repro and look into it
   eventually."
 
-  **Good answer:** Describes gathering specifics (which component, at what
-  data scale, what does "slow" mean — load time, interaction lag, scroll
-  jank) and reproducing it with the Profiler before concluding anything.
+  **Good answer:** Describes gathering specifics — which component, at
+  what amount of data, what "slow" actually means (load time? interaction
+  lag? scroll jank?) — and reproducing it with the Profiler before
+  concluding anything.
 
   **Excellent senior answer:** Frames it as a shared investigation, not an
-  accusation in either direction — the DS team owns the component's
-  intrinsic cost, the consuming team owns how they use it (unmemoized
-  wrapper, unvirtualized 10k-row list), and the fix is often on both sides.
-  Mentions building the finding into a documented pattern or a shipped
-  primitive afterward so the next team doesn't hit the same issue.
+  accusation in either direction. The design system team owns the
+  component's built-in cost; the consuming team owns how they use it (an
+  unmemoized wrapper, an unvirtualized 10,000-row list) — and the fix is
+  often needed on both sides. Mentions turning the finding into a
+  documented pattern, or a shipped primitive, so the next team doesn't hit
+  the same issue.
 
   **Common mistakes:** Assuming fault lies with either side before
-  profiling; treating it as a one-off fix rather than an opportunity to fix
-  the pattern for everyone.
+  profiling; treating it as a one-off fix instead of a chance to fix the
+  pattern for everyone.
 </ManagerQuestion>
 
 <ManagerQuestion q="How do you decide where to invest limited engineering time between new component development and performance hardening of existing ones?">
-  **What the interviewer is testing:** Prioritization judgment and the
-  ability to make a performance investment case in business terms.
+  **What the interviewer is testing:** Prioritization judgment, and the
+  ability to make the case for performance work in business terms.
 
   **Poor answer:** "Performance is always the priority."
 
   **Good answer:** Describes using data — bundle budget dashboards,
-  reported incidents, usage-at-scale patterns — to identify which
-  components are both high-usage and currently underperforming, rather
-  than optimizing uniformly or by gut feel.
+  reported incidents, usage patterns — to find which components are both
+  heavily used and currently underperforming, instead of optimizing
+  everything equally or going by gut feel.
 
-  **Excellent senior answer:** Frames the investment in multiplier terms —
-  a fix to a component used by forty teams returns more organizational
-  value per engineering hour than a new component used by two — and
-  describes setting an explicit, negotiated budget (e.g., 20% of sprint
-  capacity) for hardening work so it doesn't get perpetually deprioritized
-  against visible feature requests, which is a common failure mode on DS
-  teams specifically.
+  **Excellent senior answer:** Frames the investment as a multiplier: a
+  fix to a component used by forty teams returns more value per
+  engineering hour than a new component used by two. Describes setting an
+  explicit, agreed-upon budget (say, 20% of sprint capacity) for hardening
+  work, so it doesn't keep getting pushed aside by visible feature
+  requests — a common failure mode on design system teams specifically.
 
   **Common mistakes:** No prioritization framework at all; treating
-  performance work as something squeezed in only after all feature
-  requests are satisfied.
+  performance work as something squeezed in only after every feature
+  request is done.
 </ManagerQuestion>
 
 <ManagerQuestion q="Your bundle-size CI check is starting to get routinely overridden by teams under deadline pressure. What do you do?">
-  **What the interviewer is testing:** Whether you address the underlying
-  trust/process problem or just re-tighten the technical gate.
+  **What the interviewer is testing:** Whether you fix the underlying
+  trust or process problem, or just tighten the technical gate.
 
   **Poor answer:** "Make the check impossible to override."
 
   **Good answer:** Investigates why it's being overridden — stale budgets
-  causing false positives are a common root cause — and recalibrates
-  before assuming the team is being careless.
+  causing false alarms are a common root cause — and recalibrates before
+  assuming the team is being careless.
 
-  **Excellent senior answer:** Distinguishes the two real causes and
-  addresses each differently: if budgets are genuinely stale, ship a
-  process for reviewed, deliberate budget increases (not ad hoc override);
-  if the check is *correct* and being overridden anyway, treats that as an
-  incentive/culture problem, not a tooling problem, and raises it with
-  managers of the overriding teams directly rather than trying to solve a
-  people problem with a stricter gate.
+  **Excellent senior answer:** Tells the two real causes apart and treats
+  them differently. If budgets are genuinely stale, ship a process for
+  deliberate, reviewed budget increases instead of ad hoc overrides. If
+  the check is correct and still being overridden, that's an incentive or
+  culture problem, not a tooling one — raise it directly with the
+  managers of the overriding teams instead of trying to solve a people
+  problem with a stricter gate.
 
-  **Common mistakes:** Escalating the technical strictness of the gate
-  without first diagnosing why people are bypassing it.
+  **Common mistakes:** Making the gate stricter without first finding out
+  why people are bypassing it.
 </ManagerQuestion>
 
 ## Summary
 
-Design system performance is different in kind from application
-performance because of the multiplier: every byte, every unnecessary
-re-render, and every leaked listener is paid not once but once per
-consuming surface, at whatever scale that surface operates. This chapter
-covered eight concrete mechanisms and their fixes — barrel files silently
-defeating tree shaking (fixed with subpath exports), heavy rarely-used
-components bloating initial bundles (fixed with `React.lazy` and dynamic
-import), runtime CSS-in-JS paying a style-injection cost at high
-cardinality (fixed with static/zero-runtime CSS), leaf components
-re-rendering needlessly inside lists and tables (fixed with `React.memo`
-plus stable, primitive props, verified with the React DevTools Profiler),
-Context's all-or-nothing subscription model amplifying re-renders across
-unrelated state (fixed by splitting contexts by change frequency), DOM
-node count becoming the bottleneck at thousands of rows (fixed with
-windowing via react-window or TanStack Virtual), and long-lived
-mount/unmount-heavy components like Tooltip and Popover leaking listeners
-and portal nodes (fixed with disciplined `useEffect` cleanup, verified with
-Chrome DevTools heap snapshots). The throughline across all of them: none
-of these problems are visible in isolation or in a component demo — they
-only appear at the production data volume and consumer count a design
-system is, by definition, built for, which is exactly why they need
-deliberate profiling and CI enforcement rather than being caught by
-inspection.
+Design system performance is different from regular application
+performance because of the multiplier effect: every byte, every
+unnecessary re-render, and every leaked listener gets paid not once, but
+once per consuming app, at whatever scale that app runs. This chapter
+covered eight concrete problems and their fixes.
+
+Barrel files silently defeat tree shaking — fixed with subpath exports.
+Heavy, rarely-used components bloat the initial bundle — fixed with
+`React.lazy` and dynamic imports. Runtime CSS-in-JS pays a style-injection
+cost on components that render often — fixed with static, zero-runtime
+CSS. Leaf components re-render needlessly inside lists and tables — fixed
+with `React.memo` plus stable, primitive props, verified with the React
+DevTools Profiler. Context's all-or-nothing subscription model amplifies
+re-renders across unrelated state — fixed by splitting contexts by how
+often they change. DOM node count becomes the bottleneck at thousands of
+rows — fixed with windowing, via react-window or TanStack Virtual.
+Long-lived, mount/unmount-heavy components like Tooltip and Popover leak
+listeners and portal nodes — fixed with disciplined `useEffect` cleanup,
+verified with Chrome DevTools heap snapshots.
+
+The thread connecting all of them: none of these problems show up in
+isolation, or in a small component demo. They only appear at the
+production data volume and consumer count a design system is built for —
+which is exactly why they need deliberate profiling and CI checks,
+instead of being caught by just looking at the code.
 
 **Key takeaways**
 

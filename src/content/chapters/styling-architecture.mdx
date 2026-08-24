@@ -6,178 +6,201 @@ export const metadata = {
 
 # 6. Styling Architecture
 
+## Quick Glance
+
+- Styling architecture is about how CSS gets from a component's source code to the browser: scoped at build time or runtime, shipped as static files or generated JavaScript, and how predictably consumers can override it.
+- The one problem every tool in this chapter solves: plain CSS has a single global namespace, so `.button` in one file can silently collide with `.button` in another.
+- Two families, split by *when* the CSS is produced: build-time (CSS Modules, Vanilla Extract, Panda CSS, Tailwind — zero runtime cost) versus browser runtime (Styled Components, Emotion — real CSSOM injection cost on every render).
+- Runtime CSS-in-JS (Styled Components/Emotion) cannot power a React Server Component — there's no browser or CSSOM on the server, so any component using it needs `"use client"`.
+- CSS custom properties (`--token-name: value`) are the shared substrate every approach in this chapter can consume — this is the actual delivery mechanism for design tokens, independent of which styling library sits on top.
+- Cascade Layers (`@layer`) let a design system say "our rules always lose to the consumer's," regardless of selector specificity — replacing fragile `!important` conventions.
+- Shadow DOM gives the strongest possible style isolation (browser-enforced, cannot leak either direction) but has real friction with React's event system — reserve it for cross-framework or third-party embedding, not as a React-only default.
+- Industry trend since ~2022: new design systems default to zero-runtime CSS-in-JS (Vanilla Extract, Panda CSS) or Tailwind, driven by RSC compatibility, lower measured runtime cost, and less hydration risk — not just fashion.
+- If asked "why did GitHub/Shopify move off Styled Components," the answer is: measured runtime overhead at scale, plus RSC incompatibility, plus hydration-coordination risk that static CSS removes entirely.
+
 ## Definition
 
 Styling architecture is the set of decisions a design system makes about
 *how CSS gets from a component's source code to the browser*: whether
-styles are scoped at build time or runtime, whether they ship as static
+styles are scoped at build time or at runtime, whether they ship as static
 files or generated JavaScript, how design tokens (see
-[Chapter 2](/chapters/design-tokens)) are delivered into that CSS, and how
+[Chapter 2](/chapters/design-tokens)) get delivered into that CSS, and how
 predictably a consuming application can override a component's default
-styles without a specificity war. It is one of the most consequential and
-most frequently revisited decisions a design system team makes, because
-unlike a component's API, its styling mechanism is extremely expensive to
-migrate later — every component in the library, and every consumer's
-override, depends on it.
+styles without fighting a specificity war. It's one of the most
+consequential — and most often revisited — decisions a design system team
+makes, because unlike a component's API, its styling mechanism is very
+expensive to change later. Every component in the library, and every
+consumer's override, depends on it.
 
 ## Problem Statement
 
 Plain CSS has one structural flaw that every approach in this chapter
-exists to solve: the global namespace. A class named `.button` in one
-file collides with a class named `.button` in another file, with no
-compiler or runtime protection — the last stylesheet loaded wins, silently.
-At the scale of a single page this is annoying; at the scale of a design
-system consumed by dozens of independently-built product surfaces, each
-with its own CSS, it's untenable. Beyond naming collisions, a design system
-specifically has to solve three more problems plain CSS doesn't address on
-its own: **delivering tokens** (see [Chapter 2](/chapters/design-tokens))
-into the actual property values components use, so a rebrand or dark-mode
-switch doesn't require editing every component's CSS; **predictable
-overrides**, so a consumer can intentionally customize a component's
-appearance without fighting specificity or `!important`; and **runtime
-cost**, because a design system's styling mechanism runs on every page
-every consumer ships, at a scale where inefficiency compounds.
+exists to solve: the global namespace. A class named `.button` in one file
+collides with a class named `.button` in another file, with no compiler or
+runtime protection — whichever stylesheet loads last simply wins, silently.
+On a single page, this is just annoying. At the scale of a design system
+consumed by dozens of independently-built product surfaces, each with its
+own CSS, it's untenable.
+
+Beyond naming collisions, a design system has to solve three more problems
+plain CSS doesn't handle on its own:
+
+- **Delivering tokens** (see [Chapter 2](/chapters/design-tokens)) into the
+  actual property values components use, so a rebrand or a dark-mode
+  switch doesn't mean editing every component's CSS by hand.
+- **Predictable overrides**, so a consumer can intentionally customize a
+  component's look without fighting specificity or reaching for
+  `!important`.
+- **Runtime cost**, because a design system's styling mechanism runs on
+  every page every consumer ships — at a scale where any inefficiency adds
+  up fast.
 
 ## Why Does This Exist?
 
 This entire chapter's worth of tooling exists because CSS was designed as a
-document-styling language in 1996, with a single, page-scoped global
-namespace, and the ecosystem has spent roughly three decades bolting
-component-level scoping onto it through progressively more sophisticated
-mechanisms. Each generation of tooling solved the previous generation's
-biggest pain point while introducing a new one: preprocessors (Sass, Less)
-solved CSS's lack of variables and nesting but didn't solve scoping at all;
-CSS Modules solved scoping via build-time class name hashing but didn't
-solve dynamic, prop-driven styles; CSS-in-JS (Styled Components, Emotion)
-solved dynamic styles and scoping together but introduced runtime cost;
-zero-runtime CSS-in-JS (Vanilla Extract, Panda CSS) kept the dynamic,
-type-safe authoring experience while moving the cost back to build time;
-and Tailwind sidestepped the scoping problem entirely by never generating
-per-component class names in the first place. Understanding this chapter
-means understanding *which specific problem* each generation solved, not
-just which one is currently fashionable — because the "currently
-fashionable" answer keeps changing, and the underlying tradeoffs are what
-actually transfer between jobs and years.
+document-styling language in 1996, with one single, page-wide global
+namespace. The ecosystem has spent roughly three decades bolting
+component-level scoping onto it, through progressively more sophisticated
+tools. Each generation solved the previous generation's biggest pain point,
+while introducing a new one of its own:
+
+- **Preprocessors** (Sass, Less) solved CSS's lack of variables and nesting
+  — but didn't solve scoping at all.
+- **CSS Modules** solved scoping, using build-time class-name hashing — but
+  didn't solve dynamic, prop-driven styles.
+- **CSS-in-JS** (Styled Components, Emotion) solved dynamic styles and
+  scoping together — but introduced a runtime cost.
+- **Zero-runtime CSS-in-JS** (Vanilla Extract, Panda CSS) kept the dynamic,
+  type-safe authoring experience while moving that cost back to build
+  time.
+- **Tailwind** sidestepped the scoping problem entirely by never generating
+  per-component class names in the first place.
+
+Understanding this chapter means understanding *which specific problem*
+each generation solved — not just which tool is fashionable right now,
+because "fashionable" keeps changing, and the underlying tradeoffs are what
+actually carry over between jobs and years.
 
 ## Historical Context
 
 Sass (2006) and Less (2009) predate component-scoped CSS as a concept
 entirely — they were solving "CSS has no variables, no nesting, no
-mixins," which was a real and painful gap before CSS custom properties
-existed (see below). CSS Modules (2015, popularized by webpack's
+mixins," a real and painful gap before CSS custom properties existed (more
+on those below). CSS Modules (2015, popularized by webpack's
 `css-loader`) was the first mainstream build-time answer to scoping:
-compile-time class name hashing (`.button` becomes `.button_a1b2c3`)
-guarantees uniqueness without any runtime cost. Styled Components (2016)
+compile-time class-name hashing (`.button` becomes `.button_a1b2c3`)
+guarantees uniqueness with no runtime cost at all. Styled Components (2016)
 and Emotion (2017) arrived alongside React's rise and solved a problem CSS
 Modules didn't: dynamic, prop-driven styles co-located with the component
-that uses them (`` styled.button`color: ${props => props.color}` ``),
-at the cost of generating and injecting styles at runtime in the browser.
-This runtime CSS-in-JS era dominated new React design systems roughly from
-2017 to 2021 — Material-UI (before its v5 Emotion default and later moves),
+that uses them (`` styled.button`color: ${props => props.color}` ``), at
+the cost of generating and injecting styles in the browser at runtime. This
+runtime CSS-in-JS era dominated new React design systems roughly from 2017
+to 2021 — Material-UI (before its v5 Emotion default and later moves),
 early Chakra UI, and countless internal design systems were all built on
 Styled Components or Emotion during this window.
 
 The pendulum swung back starting around 2020-2021 with Vanilla Extract and
-later Panda CSS (2023): "zero-runtime CSS-in-JS," which keeps the
-TypeScript-authored, colocated developer experience but extracts all styles
-to static CSS files *at build time*, shipping zero styling JavaScript to
-the browser. This shift is a real, ongoing industry trend, not a one-off —
+later Panda CSS (2023): "zero-runtime CSS-in-JS" keeps the
+TypeScript-authored, colocated developer experience, but extracts all
+styles to static CSS files *at build time*, shipping zero styling
+JavaScript to the browser. This shift is real and ongoing, not a one-off —
 covered in depth in [Alternatives](#alternatives) below — driven by React
 Server Components' incompatibility with runtime style injection, and by
-measured runtime and bundle-size costs that became harder to justify once
+measured runtime and bundle-size costs that got harder to justify once
 faster alternatives existed. Tailwind CSS (2017) grew in parallel from a
 different premise entirely — utility classes instead of component-scoped
 styles — and by the mid-2020s had become the default choice for a large
 share of new products, including design-system-adjacent ecosystems like
 shadcn/ui, precisely because it sidesteps the runtime-cost question by
-generating static utility CSS at build time via a different mechanism than
-either CSS Modules or zero-runtime CSS-in-JS.
+generating static utility CSS at build time, through a different mechanism
+than either CSS Modules or zero-runtime CSS-in-JS.
 
 ## How It Works Internally
 
-**CSS Modules** work through build-time transformation: a bundler plugin
+**CSS Modules** work through a build-time transformation: a bundler plugin
 (`css-loader`, or Vite's built-in support) parses each `.module.css` file,
 generates a unique, deterministic (or content-hashed) class name for every
 local class selector, rewrites the CSS with those new names, and produces a
-JavaScript object mapping your original class names to the generated ones,
-which you import and use in your component. There is zero runtime cost
-beyond loading a normal `.css` file — the "smart" work happens entirely at
-build time, and the browser just sees plain, already-scoped CSS.
+JavaScript object that maps your original class names to the generated
+ones — you import that object and use it in your component. There's zero
+runtime cost beyond loading a normal `.css` file: the "smart" work happens
+entirely at build time, and the browser just sees plain, already-scoped
+CSS.
 
-**Sass/Less** work as pure compilers: a `.scss`/`.less` file with variables,
-nesting, mixins, and functions is compiled to plain CSS before it ever
-reaches a browser or bundler's CSS handling. There is no scoping mechanism
-built in at all — Sass/Less output is exactly as global-namespaced as
-hand-written CSS unless you separately layer CSS Modules or a manual naming
-convention (BEM) on top.
+**Sass/Less** work as pure compilers: a `.scss`/`.less` file with
+variables, nesting, mixins, and functions gets compiled to plain CSS before
+it ever reaches a browser or a bundler's CSS handling. There's no scoping
+mechanism built in at all — Sass/Less output is exactly as global-namespaced
+as hand-written CSS, unless you separately layer CSS Modules or a manual
+naming convention (BEM) on top.
 
-**Styled Components / Emotion (runtime CSS-in-JS)** work by intercepting
-component render: a tagged template literal (`` styled.div`...` ``) creates
-a React component that, on every render, computes the actual CSS string
-(interpolating any prop-driven values), hashes it to generate a unique
-class name, and — if that hash hasn't been seen before — injects a new
-`<style>` rule into the document via the CSSOM (`document.styleSheets`
-APIs), then applies the generated class name to the rendered DOM node. This
-is real work happening in the browser on every unique style combination:
-string interpolation, hashing, and a CSSOM insertion, all during React's
-render/commit cycle. Emotion optimizes this more aggressively than early
-Styled Components (a compiled/`@emotion/babel-plugin` mode can pre-hash
-static parts at build time), but the fundamentally dynamic, runtime-driven
-mechanism is the same for any part of the style that depends on props or
-state.
+**Styled Components / Emotion (runtime CSS-in-JS)** work by intercepting a
+component's render: a tagged template literal (`` styled.div`...` ``)
+creates a React component that, on every render, computes the actual CSS
+string (interpolating any prop-driven values), hashes it to generate a
+unique class name, and — if that hash hasn't been seen before — injects a
+new `<style>` rule into the document via the CSSOM
+(`document.styleSheets` APIs), then applies the generated class name to the
+rendered DOM node. This is real work happening in the browser for every
+unique style combination: string interpolation, hashing, and a CSSOM
+insertion, all during React's render/commit cycle. Emotion optimizes this
+more aggressively than early Styled Components (a compiled mode via
+`@emotion/babel-plugin` can pre-hash static parts at build time), but the
+fundamentally dynamic, runtime-driven mechanism is the same for any part of
+a style that depends on props or state.
 
 **Vanilla Extract / Panda CSS (zero-runtime CSS-in-JS)** work by running
 your TypeScript style definitions through a *build-time* compiler (a
 webpack/Vite plugin, or Panda's separate codegen CLI step) that statically
 evaluates every `style()`/`css()` call, extracts the resulting CSS to real
-`.css` files written to disk, and replaces your style calls in the compiled
-JS with plain string class name references — by the time the bundle reaches
-the browser, there is no styling library runtime at all, only static CSS
-files and string constants. The tradeoff this mechanism forces: because
-extraction happens at build time, style values generally have to be
-statically analyzable (known at build time), which is why fully dynamic,
+`.css` files on disk, and replaces your style calls in the compiled
+JavaScript with plain string class-name references. By the time the bundle
+reaches the browser, there's no styling-library runtime at all — only
+static CSS files and string constants. The tradeoff this forces: because
+extraction happens at build time, style values generally need to be
+statically analyzable (known at build time). That's why fully dynamic,
 runtime-computed styles (an arbitrary user-picked hex color, for instance)
-typically fall back to CSS custom properties set via inline `style` for
-just that dynamic slice, rather than full CSS-in-JS generation for it.
+typically fall back to a CSS custom property set via inline `style` for
+just that one dynamic slice, rather than generating full CSS-in-JS for it.
 
 **Tailwind CSS** works through a different mechanism entirely: it doesn't
 generate per-component CSS at all. A build-time scanner walks your source
-files, finds every utility class name used in `className`/`class`
-attributes (`px-4`, `text-sm`, `bg-brand-500`), and generates exactly the
+files, finds every utility class name used in a `className`/`class`
+attribute (`px-4`, `text-sm`, `bg-brand-500`), and generates exactly the
 CSS for those classes — and only those classes — from a fixed, predefined
 utility vocabulary, discarding everything unused. There's no per-component
-scoping to solve because there's no per-component CSS being generated;
+scoping to solve, because there's no per-component CSS being generated —
 every class is a small, globally-shared, single-purpose utility, and the
-"scoping" problem is sidestepped by having such narrow, unambiguous utility
-names that collision essentially can't happen (`.mt-4` means exactly one
-thing everywhere it's used).
+"scoping" problem is sidestepped by making utility names so narrow and
+unambiguous that a collision essentially can't happen (`.mt-4` means
+exactly one thing everywhere it's used).
 
 **CSS Custom Properties** (`--token-name: value;`) are the one mechanism
-underlying nearly every approach above: they're a native, runtime-mutable
+underlying nearly every approach above. They're a native, runtime-mutable
 CSS feature — the browser resolves `var(--token-name)` at paint/layout
-time, re-resolving automatically if the custom property's value changes
-(via a class toggle, a media query, or JS setting
+time, and automatically re-resolves it if the custom property's value
+changes (via a class toggle, a media query, or JavaScript calling
 `element.style.setProperty`). This is why custom properties, not any
 specific styling library, are the actual token-delivery mechanism discussed
-throughout [Chapter 2](/chapters/design-tokens) — CSS Modules, Styled
+throughout [Chapter 2](/chapters/design-tokens): CSS Modules, Styled
 Components, Vanilla Extract, and Tailwind can all consume the same
-`var(--color-brand-500)` reference; they differ only in how the *rest* of
-the component's CSS gets scoped and shipped, not in how tokens are
-threaded through.
+`var(--color-brand-500)` reference. They differ only in how the *rest* of
+the component's CSS gets scoped and shipped, not in how tokens are threaded
+through.
 
-**CSS Cascade Layers (`@layer`)** are a native CSS mechanism (broadly
-supported since 2022) that lets you explicitly define the priority order
+**CSS Cascade Layers (`@layer`)** are a native CSS feature (broadly
+supported since 2022) that let you explicitly define the priority order
 between groups of rules, independent of selector specificity or source
 order. Rules inside an earlier-declared layer always lose to rules inside a
-later-declared layer, *regardless of how specific either selector is* —
-which is the actual problem layers solve: without them, a design system's
-`.btn { color: blue }` and a consumer's `.custom-page .btn { color: red }`
-resolve by specificity math (the consumer wins here, because their selector
-is more specific), which is inconsistent and hard for a design system to
-reason about across every possible consumer selector shape. With layers,
-the design system declares its own styles inside a low-priority layer
-(`@layer components`) and consumers' overrides — even a single unspecific
-class — reliably win, because unlayered/later-layered rules always beat
+later-declared layer, *no matter how specific either selector is*. That's
+the actual problem layers solve: without them, a design system's `.btn {
+color: blue }` and a consumer's `.custom-page .btn { color: red }` resolve
+by specificity math (the consumer wins here, because their selector is more
+specific) — which is inconsistent and hard for a design system to predict
+across every possible consumer selector shape. With layers, the design
+system declares its own styles inside a low-priority layer (`@layer
+components`), and consumers' overrides — even a single unspecific class —
+reliably win, because unlayered or later-layered rules always beat
 earlier-layered ones.
 
 **Shadow DOM** is a browser-native encapsulation boundary (part of the Web
@@ -188,9 +211,9 @@ page-level CSS cannot reach in to style the shadow root's contents (with a
 small number of deliberate exceptions: inherited properties, and
 `::part()`/custom-property piercing). This is stronger isolation than any
 build-time scoping mechanism (CSS Modules, zero-runtime CSS-in-JS) can
-offer, because it's enforced by the browser's rendering engine itself, not
-by unique class names that a sufficiently ID-specific or `!important`-laden
-consumer selector could still theoretically override.
+offer, because the browser's rendering engine itself enforces it — not
+unique class names that a sufficiently ID-specific or `!important`-laden
+consumer selector could theoretically still override.
 
 ## Architecture
 
@@ -209,10 +232,10 @@ graph TD
   I --> J[Predictable consumer overrides]
 ```
 
-Read this as: regardless of which authoring mechanism a team picks, tokens
-flow through the same CSS custom property layer (see
-[Chapter 2](/chapters/design-tokens)), and the mechanisms split into two
-families by *when* the final CSS is produced — build time (CSS Modules,
+Read this as: whichever authoring mechanism a team picks, tokens flow
+through the same CSS custom property layer (see
+[Chapter 2](/chapters/design-tokens)). The mechanisms then split into two
+families by *when* the final CSS gets produced — build time (CSS Modules,
 Vanilla Extract, Panda, Tailwind, all converging on static `.css` files)
 versus browser runtime (Styled Components, Emotion, injecting `<style>`
 tags on the fly) — with cascade layers as the final step that makes the
@@ -221,27 +244,26 @@ build-time family's output reliably overridable by consumers.
 ## Real-World Example
 
 GitHub's Primer design system migrated from Styled Components to CSS
-Modules, publishing the reasoning explicitly: runtime style computation was
-showing up in their own performance profiling as measurable overhead at
-GitHub's scale, and CSS Modules' zero-runtime, build-time-only cost was a
-direct fix. Shopify's Polaris moved away from Sass toward CSS custom
-properties plus CSS Modules for the same class of reasons — predictable,
-static output, tokens delivered natively via custom properties rather than
-compiled-away Sass variables that can't be changed at runtime for theming.
-Vanilla Extract itself was built by the Seek (Australian jobs platform)
-design system team, specifically because they wanted Styled Components'
-TypeScript-native, colocated authoring ergonomics without its runtime cost
-— and it has since been adopted by teams including Discord's web client's
-some internal tooling and numerous design systems in the Vercel/Next.js
-ecosystem, partly because zero-runtime approaches are the only CSS-in-JS
-style that's compatible with React Server Components (runtime CSS-in-JS
-libraries need to inject styles during client-side render, which doesn't
-have a defined mechanism inside a Server Component that never runs in the
-browser at all). Vercel's own design system and much of the shadcn/ui
-ecosystem defaults to Tailwind, and Adobe's Spectrum 2 (the current
-generation of Adobe's system) uses a build-time CSS approach with heavy
-custom-property-based theming rather than runtime CSS-in-JS, reflecting the
-same industry-wide shift discussed below.
+Modules and published the reasoning: runtime style computation was showing
+up in their own performance profiling as measurable overhead at GitHub's
+scale, and CSS Modules' zero-runtime, build-time-only cost was a direct
+fix. Shopify's Polaris moved away from Sass toward CSS custom properties
+plus CSS Modules for a similar reason — predictable, static output, with
+tokens delivered natively via custom properties rather than compiled-away
+Sass variables that can't change at runtime for theming. Vanilla Extract
+itself was built by the Seek (Australian jobs platform) design system team,
+specifically because they wanted Styled Components' TypeScript-native,
+colocated authoring feel without its runtime cost — and it's since been
+adopted by teams including parts of Discord's web client and numerous
+design systems in the Vercel/Next.js ecosystem. Part of the reason: it's
+the only kind of CSS-in-JS that's compatible with React Server Components,
+since runtime CSS-in-JS libraries need to inject styles during a
+client-side render, and there's no defined way to do that inside a Server
+Component, which never runs in the browser at all. Vercel's own design
+system and much of the shadcn/ui ecosystem default to Tailwind, and Adobe's
+Spectrum 2 (the current generation of Adobe's system) uses a build-time CSS
+approach with heavy custom-property-based theming rather than runtime
+CSS-in-JS — reflecting the same industry-wide shift discussed below.
 
 ## Implementation Example
 
@@ -361,7 +383,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 ```
 
 <Callout type="warning" title="This component can't be a Server Component">
-  The `css` prop and `@emotion/react`'s runtime require a client-side
+  The `css` prop and `@emotion/react`'s runtime need a client-side
   style-injection mechanism that has no defined behavior inside a React
   Server Component — this file needs `"use client"` the moment you adopt
   Emotion's `css` prop API, which (per
@@ -651,64 +673,63 @@ customElements.define("x-button", XButton);
 ```
 
 Note the two deliberate escape hatches used here: CSS custom properties
-*do* pierce the shadow boundary (they're inherited like any other
-inherited CSS property), which is how tokens still reach into a Shadow DOM
-component without breaking encapsulation — and `part="button"` exposes a
-named "part" a page author can style from outside via `::part(button)`,
-giving controlled, opt-in external styling without fully breaking
-isolation.
+*do* pierce the shadow boundary (they're inherited like any other inherited
+CSS property), which is how tokens still reach into a Shadow DOM component
+without breaking encapsulation. And `part="button"` exposes a named "part"
+a page author can style from outside via `::part(button)`, giving
+controlled, opt-in external styling without fully breaking isolation.
 
 ## Advantages
 
 Build-time approaches (CSS Modules, Vanilla Extract, Panda, Tailwind) share
-the core advantage of zero runtime styling cost — no CSSOM insertion, no
-style recomputation, no hydration-time style mismatch risk, and full
-compatibility with React Server Components since nothing about producing
-the CSS depends on JavaScript executing in a browser. Runtime CSS-in-JS's
-advantage is genuinely superior authoring ergonomics for fully dynamic,
-truly runtime-computed styles (an arbitrary color from a color picker,
-computed layout values) where build-time extraction structurally can't
-help because the value isn't known until the browser runs. CSS custom
+one core advantage: zero runtime styling cost. No CSSOM insertion, no style
+recomputation, no hydration-time style mismatch risk, and full
+compatibility with React Server Components, since producing the CSS never
+depends on JavaScript running in a browser. Runtime CSS-in-JS's advantage
+is genuinely better authoring ergonomics for fully dynamic,
+truly runtime-computed styles — an arbitrary color from a color picker, a
+computed layout value — where build-time extraction structurally can't
+help, because the value isn't known until the browser runs. CSS custom
 properties as the shared token layer give every approach in this chapter
-the same live-updating theming capability — flipping a `data-theme`
-attribute or `class` on `<html>` instantly re-resolves every `var()`
-reference across the whole page, with no re-render, no re-computation,
-just the browser's native cascade doing what it already does. Cascade
-layers give any build-time approach a native, standards-based answer to the
-override-predictability problem that used to require specificity
-gymnastics or `!important`. Shadow DOM's advantage is the strongest
-possible isolation guarantee — genuinely impossible-to-leak styles in
-either direction, useful specifically for design systems that need to be
-embeddable into pages they don't control at all (a third-party widget, a
-micro-frontend with unknown host CSS).
+the same live-updating theming: flipping a `data-theme` attribute or class
+on `<html>` instantly re-resolves every `var()` reference across the whole
+page, with no re-render and no re-computation — just the browser's native
+cascade doing what it already does. Cascade layers give any build-time
+approach a native, standards-based answer to the override-predictability
+problem that used to require specificity gymnastics or `!important`.
+Shadow DOM's advantage is the strongest possible isolation guarantee —
+genuinely impossible-to-leak styles in either direction, useful
+specifically for design systems that need to be embeddable into pages they
+don't control at all (a third-party widget, a micro-frontend with unknown
+host CSS).
 
 ## Disadvantages
 
 Runtime CSS-in-JS pays a real, measured cost: style computation and CSSOM
 insertion on every unique style combination during render, larger
-JavaScript bundles (the styling library itself plus every component's style
-definitions ship as JS, not just CSS), a specific and now well-documented
-incompatibility with Server Components, and historically worse SSR
-performance due to the extra step of extracting critical CSS server-side
-and rehydrating it correctly on the client. Zero-runtime CSS-in-JS's
-disadvantage is the static-analysis constraint — genuinely dynamic,
+JavaScript bundles (the styling library itself, plus every component's
+style definitions, ship as JS — not just CSS), a specific and now
+well-documented incompatibility with Server Components, and historically
+worse SSR performance from the extra step of extracting critical CSS on the
+server and rehydrating it correctly on the client. Zero-runtime CSS-in-JS's
+disadvantage is its static-analysis constraint: genuinely dynamic,
 per-instance runtime values (not just a fixed set of variants) require
-falling back to inline custom properties, which is an extra pattern
-authors have to learn, and the build tooling (a webpack/Vite plugin, or a
-separate codegen step for Panda) adds real build-pipeline complexity and a
-slower initial learning curve than "just write CSS." Tailwind's
-disadvantage is markup verbosity (`className` strings with a dozen or more
-utility classes are common) and, without a component abstraction layer on
-top (`cva`, or wrapping in actual components as shown above), a real risk
-of style duplication and drift across usages instead of a single source of
-truth per pattern. CSS Modules' disadvantage is the least ergonomic dynamic
-styling story of any approach here — conditional/prop-driven styles need
-manual class-name composition (`clsx`), with no built-in variant API.
-Shadow DOM's disadvantage is real friction with React specifically (React's
-synthetic event system and portal-based patterns don't cross shadow
-boundaries cleanly without extra work), fragmented cross-browser DevTools
-ergonomics historically, and the practical reality that most product teams
-building with React have no reason to reach for Web Components at all.
+falling back to inline custom properties, an extra pattern authors have to
+learn — and the build tooling (a webpack/Vite plugin, or a separate codegen
+step for Panda) adds real build-pipeline complexity and a slower initial
+learning curve than "just write CSS." Tailwind's disadvantage is markup
+verbosity (`className` strings with a dozen or more utility classes are
+common), and, without a component abstraction layer on top (`cva`, or
+wrapping in actual components as shown above), a real risk of style
+duplication and drift across usages instead of one source of truth per
+pattern. CSS Modules' disadvantage is the least ergonomic dynamic-styling
+story of any approach here — conditional or prop-driven styles need manual
+class-name composition (`clsx`), with no built-in variant API. Shadow DOM's
+disadvantage is real friction with React specifically (React's synthetic
+event system and portal-based patterns don't cross shadow boundaries
+cleanly without extra work), historically fragmented cross-browser DevTools
+support, and the practical reality that most product teams building with
+React have no reason to reach for Web Components at all.
 
 ## Alternatives
 
@@ -731,38 +752,44 @@ systems have to make once, expensively, up front.
 
 ### Why large companies are moving toward zero-runtime approaches
 
-This shift is real and worth naming directly, because it's one of the more
+This shift is real and worth naming directly — it's one of the more
 consequential styling-architecture trends of the last five years. Three
-concrete forces are driving it. First, **React Server Components**
-structurally cannot run a runtime CSS-in-JS library's style-injection logic
-— there is no browser, no `document`, no CSSOM to inject into, during a
-Server Component's execution — so any design system component built with
-Styled Components' or Emotion's `css` prop has to become a Client Component
-the moment it needs that mechanism, which (per
-[Chapter 4](/chapters/react-architecture)) drags its whole import subtree
-into the client bundle. Teams adopting Next.js's App Router at scale hit
-this wall directly, and it's a hard technical incompatibility, not a
-preference. Second, **measured runtime and bundle-size cost**: multiple
-large engineering orgs (GitHub's Primer team publicly, and privately at
-many companies with internal design systems) have profiled runtime
-CSS-in-JS under real production load and found style computation and CSSOM
-insertion showing up as non-trivial main-thread time at scale, plus the
-styling library itself and every component's style logic shipping as
-client JavaScript that a zero-runtime or static-CSS approach doesn't pay at
-all. Third, **hydration risk**: runtime CSS-in-JS historically required
-careful server/client coordination (extracting critical CSS server-side,
+concrete forces are driving it.
+
+First, **React Server Components** structurally cannot run a runtime
+CSS-in-JS library's style-injection logic — there's no browser, no
+`document`, no CSSOM to inject into, during a Server Component's execution.
+So any design system component built with Styled Components' or Emotion's
+`css` prop has to become a Client Component the moment it needs that
+mechanism, which (per [Chapter 4](/chapters/react-architecture)) drags its
+whole import subtree into the client bundle. Teams adopting Next.js's App
+Router at scale hit this wall directly — it's a hard technical
+incompatibility, not a preference.
+
+Second, **measured runtime and bundle-size cost**: multiple large
+engineering orgs (GitHub's Primer team, publicly, and privately at many
+companies with internal design systems) have profiled runtime CSS-in-JS
+under real production load and found style computation and CSSOM insertion
+showing up as non-trivial main-thread time at scale — plus the styling
+library itself, and every component's style logic, shipping as client
+JavaScript that a zero-runtime or static-CSS approach doesn't pay for at
+all.
+
+Third, **hydration risk**: runtime CSS-in-JS historically needed careful
+server/client coordination (extracting critical CSS server-side,
 rehydrating the style cache client-side) to avoid a flash of unstyled or
-mis-styled content, and that coordination is an entire class of bug that
-simply doesn't exist when the CSS is static from the start. None of this
-means runtime CSS-in-JS is "dead" — Styled Components and Emotion remain
-extremely widely deployed in existing codebases, and genuinely
+mis-styled content — and that coordination is an entire class of bug that
+simply doesn't exist when the CSS is static from the start.
+
+None of this means runtime CSS-in-JS is "dead." Styled Components and
+Emotion remain widely deployed in existing codebases, and genuinely
 runtime-dynamic styling (arbitrary user-picked values with no fixed variant
-set) is still easier to express with them — but for a **new** design system
+set) is still easier to express with them. But for a **new** design system
 built after roughly 2022, the default recommendation across the industry
 has clearly shifted toward zero-runtime CSS-in-JS (Vanilla Extract, Panda
-CSS) or Tailwind, specifically because both eliminate the RSC
-incompatibility and the runtime cost simultaneously, and the tooling
-required to adopt them (a build plugin, a config file) is no longer the
+CSS) or Tailwind — specifically because both eliminate the RSC
+incompatibility and the runtime cost at the same time, and the tooling
+needed to adopt them (a build plugin, a config file) is no longer the
 adoption barrier it was in 2020.
 
 ## Tradeoffs
@@ -771,51 +798,56 @@ The tradeoff underlying nearly every choice in this chapter is *authoring
 flexibility at runtime* versus *cost paid by every consumer, every page
 load*. Runtime CSS-in-JS maximizes the former — you can compute a style
 from literally any runtime value with no build-time constraint — at the
-cost of the latter, paid by every single user of every product built on the
-design system. Zero-runtime approaches invert this: they constrain what can
-be expressed (styles generally need to be statically analyzable, variants
-need to be enumerable) in exchange for eliminating that cost entirely.
-Tailwind takes the constraint furthest — no custom CSS-in-JS-like dynamic
-computation at all, just composition of a fixed utility vocabulary — and
-gets the most predictable, smallest, most cacheable output as a result. CSS
-Modules sits in between: zero runtime cost like the build-time approaches,
-but without the type-safe, token-aware authoring ergonomics the newer
-zero-runtime CSS-in-JS tools add on top. The second tradeoff, orthogonal to
-the first, is override predictability versus encapsulation strength: cascade
-layers give a design system fine-grained, intentional control over *which*
-of its own rules a consumer can easily override, while Shadow DOM gives
-total, unconditional isolation that a consumer generally cannot override at
-all without the design system explicitly exposing a `::part()` or custom
-property escape hatch — the right choice depends entirely on whether the
-design system wants consumers customizing its components (most React
-design systems: yes) or wants to guarantee a component looks identical
-everywhere regardless of host page CSS (embeddable widgets: often yes).
+cost of the latter, paid by every single user of every product built on
+the design system. Zero-runtime approaches invert this: they constrain
+what can be expressed (styles generally need to be statically analyzable,
+variants need to be enumerable) in exchange for eliminating that cost
+entirely. Tailwind takes the constraint furthest — no custom
+CSS-in-JS-like dynamic computation at all, just composition of a fixed
+utility vocabulary — and gets the most predictable, smallest, most
+cacheable output as a result. CSS Modules sits in between: zero runtime
+cost like the build-time approaches, but without the type-safe,
+token-aware authoring ergonomics the newer zero-runtime CSS-in-JS tools add
+on top.
+
+The second tradeoff, separate from the first, is override predictability
+versus encapsulation strength: cascade layers give a design system
+fine-grained, intentional control over *which* of its own rules a consumer
+can easily override, while Shadow DOM gives total, unconditional isolation
+that a consumer generally cannot override at all without the design system
+explicitly exposing a `::part()` or custom property escape hatch. The right
+choice depends entirely on whether the design system wants consumers
+customizing its components (most React design systems: yes) or wants to
+guarantee a component looks identical everywhere regardless of host page
+CSS (embeddable widgets: often yes).
 
 ## Performance Considerations
 
 For runtime CSS-in-JS specifically, the concrete, measurable costs are:
 style-string interpolation and hashing on every unique prop combination
-(cacheable per-hash, but the cache itself has memory and lookup cost),
+(cacheable per-hash, but the cache itself has memory and lookup cost);
 CSSOM insertion cost (`insertRule` calls are not free, and a page mounting
 hundreds of design-system component instances with many unique style
-combinations can produce hundreds of these calls on initial render), and
-the client bundle weight of the styling library's runtime itself (Emotion's
-core is smaller than early Styled Components, but neither is zero). For any
-build-time approach, the performance profile shifts almost entirely to
-**CSS file size and specificity/cascade complexity** rather than runtime
-cost — the practical levers are keeping the generated CSS's total
-selector count and rule count bounded (Tailwind and Panda's atomic-class
-approach naturally caps this via deduplication; hand-written CSS Modules
-can bloat if every variant gets its own full rule set instead of composing
-small ones), and ensuring critical, above-the-fold CSS is inlined or
-delivered with the smallest possible blocking request rather than deferred
-behind a large monolithic stylesheet. Cascade layers themselves have no
-runtime performance cost — they're resolved by the browser's existing
-cascade-resolution engine, not an added computation step. See
-[Chapter 13](/chapters/performance) for the broader CSS-performance and
-bundle-budget discussion this connects to, including how these choices
-interact with code-splitting a large component library's stylesheet across
-route boundaries.
+combinations can produce hundreds of these calls on the initial render);
+and the client bundle weight of the styling library's runtime itself
+(Emotion's core is smaller than early Styled Components, but neither is
+zero).
+
+For any build-time approach, the performance profile shifts almost
+entirely to **CSS file size and specificity/cascade complexity** rather
+than runtime cost. The practical levers are keeping the generated CSS's
+total selector count and rule count bounded (Tailwind's and Panda's atomic
+class approach naturally caps this through deduplication; hand-written CSS
+Modules can bloat if every variant gets its own full rule set instead of
+composing small ones), and making sure critical, above-the-fold CSS is
+inlined or delivered with the smallest possible blocking request, rather
+than deferred behind one large monolithic stylesheet. Cascade layers
+themselves have no runtime performance cost — they're resolved by the
+browser's existing cascade-resolution engine, not an added computation
+step. See [Chapter 13](/chapters/performance) for the broader
+CSS-performance and bundle-budget discussion this connects to, including
+how these choices interact with code-splitting a large component library's
+stylesheet across route boundaries.
 
 ## Scalability Considerations
 
@@ -825,20 +857,20 @@ enough consumers, and enough concurrent page instances of those components
 for the runtime-vs-build-time cost difference to become visible in
 aggregate. The scaling failure mode specific to runtime CSS-in-JS is that
 its cost is proportional to the number of *unique* style combinations
-actually rendered on a page, which grows with the design system's own
-success — more variants, more consumers combining props in more ways, more
-unique hashes computed and injected. The scaling failure mode specific to
-Tailwind and atomic-CSS approaches is closer to the opposite: the CSS file
-size grows sublinearly with usage because classes are shared and
-deduplicated across the whole app, which is exactly why these approaches
-tend to hold up better as a design system's consumer base grows into the
-tens or hundreds of teams. Cascade layers scale well organizationally too —
-because override priority is declared once, centrally, in the layer order,
-a design system doesn't need to coordinate specificity conventions with
-every consuming team individually as the number of consumers grows, which
-is a real coordination cost the pre-layers era paid in practice (style
-guides full of "never use `!important`, always use exactly one class"
-conventions that had to be manually enforced).
+actually rendered on a page, and that number grows with the design
+system's own success — more variants, more consumers combining props in
+more ways, more unique hashes computed and injected. The scaling failure
+mode specific to Tailwind and atomic-CSS approaches is closer to the
+opposite: the CSS file size grows sublinearly with usage, because classes
+are shared and deduplicated across the whole app — which is exactly why
+these approaches tend to hold up better as a design system's consumer base
+grows into the tens or hundreds of teams. Cascade layers scale well
+organizationally too: because override priority is declared once,
+centrally, in the layer order, a design system doesn't need to coordinate
+specificity conventions with every consuming team individually as the
+number of consumers grows — a real coordination cost the pre-layers era
+paid in practice (style guides full of "never use `!important`, always use
+exactly one class" conventions that had to be manually enforced).
 
 ## Common Mistakes
 
@@ -1165,10 +1197,10 @@ conventions that had to be manually enforced).
 
 ## Summary
 
-Every mechanism in this chapter exists to solve the same original problem —
-CSS's global namespace — but they diverge sharply on *when* the solution's
-cost is paid: build time (CSS Modules, Vanilla Extract, Panda CSS,
-Tailwind) or browser runtime (Styled Components, Emotion). That single
+Every mechanism in this chapter exists to solve the same original problem
+— CSS's global namespace — but they diverge sharply on *when* the
+solution's cost gets paid: build time (CSS Modules, Vanilla Extract, Panda
+CSS, Tailwind) or browser runtime (Styled Components, Emotion). That single
 axis explains most of the chapter's other conclusions. Build-time
 approaches ship zero styling JavaScript, are naturally compatible with
 React Server Components, and have become the clear industry default for

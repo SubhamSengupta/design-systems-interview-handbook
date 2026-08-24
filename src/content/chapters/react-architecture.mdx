@@ -6,175 +6,190 @@ export const metadata = {
 
 # 4. React Architecture for Design Systems
 
+## Quick Glance
+
+- This chapter covers the React-level engineering choices behind a design system: Context, memoization, Server vs Client Components, concurrent rendering, Suspense, and hydration.
+- `React.memo` does **not** stop a re-render caused by a changed Context value — memo checks props, Context subscriptions bypass that check entirely. This is the single most common interview trap in this chapter.
+- Split Context by how often a value changes and who reads it (e.g. theme state vs. theme setter) — this turns "everyone re-renders" into "only the actual subscribers re-render."
+- Memoizing a leaf component (Icon, Avatar, Button) pays off far more in a design system than in app code, because the same component is mounted hundreds or thousands of times across every consumer.
+- Server Components rule: a Server Component can render a Client Component, but a Client Component can never directly import a Server Component — only receive one as `children`. Push `"use client"` as far down the tree as possible.
+- Never put `"use client"` on a barrel/index file — it drags the entire library into every consumer's client bundle.
+- `useTransition` and `useDeferredValue` reschedule work, they do not make it faster. If a computation is genuinely slow (e.g. filtering 50,000 rows), the real fix is virtualization, not a transition.
+- Hydration mismatches happen when server-rendered HTML and the client's first render don't match (random IDs, `Date.now()`, `window` checks). Fix with `useId` or by deferring the non-deterministic value to `useEffect` — don't reach for `suppressHydrationWarning` as a default fix.
+- Most design systems keep Context for anything internal to one compound component, and only reach for an external store (Zustand/Jotai) for cross-cutting state the system needs to observe, like a global toast queue.
+
 ## Definition
 
-React architecture, in the design-system sense, is the set of framework-level
-decisions that never show up in a Figma file but decide whether the system is
-fast, correct, and pleasant to consume at scale: how state is shared through
-a component tree (Context and its alternatives), how re-renders are
-contained (memoization), where the client/server boundary sits (Server
-Components), how non-urgent updates are scheduled (concurrent rendering,
-`useTransition`), how async state is represented in the render tree
-(Suspense), and how server-rendered HTML reconciles with the client-rendered
-tree (hydration, streaming). None of this is visible to a designer reviewing
-a component in isolation. All of it is a system-wide multiplier: get one
-mistake into a primitive like `Select` or `Button`, and every product team
-that imports it inherits the mistake, usually without knowing why their app
+React architecture, for a design system, means the framework-level choices
+that never show up in a Figma file. These choices decide whether the system
+is fast, correct, and easy to use at scale. They include:
+
+- How state moves through the component tree (Context and its alternatives).
+- How re-renders are kept under control (memoization).
+- Where the line between server and client code sits (Server Components).
+- How low-priority updates get scheduled (concurrent rendering, `useTransition`).
+- How async state shows up in the render tree (Suspense).
+- How the server's HTML matches up with the client's rendered tree (hydration, streaming).
+
+A designer reviewing one component in isolation never sees any of this. But
+every choice here acts as a system-wide multiplier. Put one mistake into a
+shared primitive like `Select` or `Button`, and every product team that
+imports it inherits the mistake — usually without knowing why their app
 feels slow.
 
 ## Problem Statement
 
-A design system component is imported by definition far more times than any
-single application component. A `Button` that's mounted in one feature team's
-checkout flow is also mounted in the admin dashboard, the marketing site, the
-mobile web wrapper, and a hundred other places nobody on the design system
-team has ever looked at. This asymmetry changes the cost-benefit math for
-every React performance and architecture decision:
+A design system component gets imported far more often than any single
+application component. A `Button` used in one team's checkout flow is also
+used in the admin dashboard, the marketing site, the mobile web wrapper, and
+a hundred other places nobody on the design system team has ever looked at.
+This changes the cost/benefit math for every React performance decision:
 
-- A re-render that costs 2ms in a normal app component is a rounding error.
-  The same 2ms wasted re-render, if it happens inside a design system
-  primitive that's mounted 500 times on one page (a data table's cells, a
-  form's inputs), becomes a full second of wasted main-thread time.
-- A Context provider that re-renders its entire subtree on every state
-  change is annoying in a five-component app. In a design system's compound
-  component (`Tabs`, `Accordion`, `Menu`), the same pattern means every
-  consumer's page re-renders subtrees they never asked to re-render, and the
-  design system team gets blamed for a performance regression they can't see
+- A re-render that costs 2ms inside a normal app component barely matters.
+  The same 2ms wasted re-render, inside a design system primitive mounted
+  500 times on one page (a data table's cells, a form's inputs), adds up to
+  a full second of wasted main-thread time.
+- A Context provider that re-renders its whole subtree on every state change
+  is a minor annoyance in a five-component app. Inside a design system's
+  compound component (`Tabs`, `Accordion`, `Menu`), the same pattern means
+  every consumer's page re-renders subtrees it never asked to re-render —
+  and the design system team gets blamed for a slowdown they can't even see
   in their own Storybook.
-- Choosing `"use client"` on a primitive that didn't need it doesn't just
-  affect that one component's bundle — it forces every ancestor up to the
-  nearest Server Component boundary into the client bundle too, because
-  Server and Client Components can't interleave arbitrarily (a Server
-  Component can render a Client Component, but not the reverse without going
-  through `children`).
-- A hydration mismatch in a component used on one page is a bug report. The
-  same mismatch in a component used everywhere is React silently discarding
-  server HTML and re-rendering from scratch on every page in the product,
-  which is a Core Web Vitals regression across the whole company.
+- Adding `"use client"` to a primitive that didn't need it doesn't just
+  affect that one component's bundle. It forces every ancestor up to the
+  nearest Server Component boundary into the client bundle too, because a
+  Server Component can render a Client Component, but not the other way
+  around (unless the Client Component receives the Server Component as
+  `children`).
+- A hydration mismatch (see below) in a component used on one page is a bug
+  report. The same mismatch in a component used everywhere means React
+  quietly throws away the server's HTML and re-renders it from scratch on
+  every page across the whole product — a real hit to Core Web Vitals
+  company-wide.
 
-This is the core problem this chapter addresses: the React-level decisions
-that are "good enough" defaults in application code are frequently wrong
-defaults in design system code, because the fan-out multiplies both the
-benefit of getting them right and the cost of getting them wrong.
+This is the core problem this chapter solves: defaults that are "good
+enough" in application code are often wrong defaults in design system code,
+because the fan-out multiplies both the payoff of getting them right and the
+cost of getting them wrong.
 
 ## Why Does This Exist?
 
-React's rendering model is intentionally permissive by default — components
-re-render, Context propagates to every consumer, and nothing is memoized
-unless you ask for it. That default is fine for application code because
-application code has natural boundaries: a form re-rendering when its input
-changes is expected and cheap. Design systems break that assumption because
-they sit at the base of the component tree, wrapping and being wrapped by
-everything above them. A `ThemeProvider` sits above the entire application. A
-`Button` sits below almost every other component. Both positions are
-performance-critical for different reasons — the provider because it decides
-who re-renders, the leaf because of sheer instance count — and React gives
-you no default protection against either problem. You have to design for it.
+React is permissive by default: components re-render freely, Context
+propagates to every consumer, and nothing is memoized unless you ask for it.
+That's fine for application code, which has natural boundaries — a form
+re-rendering when its input changes is expected and cheap. Design systems
+break that assumption because they sit at the base of the component tree,
+wrapping and being wrapped by everything above them. A `ThemeProvider` sits
+above the entire application. A `Button` sits below almost everything else.
+Both positions matter for performance, for different reasons: the provider
+because it decides who re-renders, the leaf because there are so many
+instances of it. React gives you no built-in protection against either
+problem — you have to design for it yourself.
 
-The second reason this exists as its own discipline is that React itself has
-changed shape underneath design systems in the last several years. Server
-Components, concurrent rendering, and the new hydration model didn't exist
-when Material-UI, Ant Design, or Chakra UI's original APIs were designed.
-Every actively maintained design system has had to retrofit answers to "is
-this a Server Component?" and "does this API work under React 18/19's
-concurrent scheduler?" onto an API surface that predates both questions. A
-design system that gets these questions right up front — as newer entrants
-like [Radix UI](/chapters/case-studies), Base UI, and React Aria Components
-have — ships a materially better default experience to every consuming team
-than one that treats them as an afterthought.
+The second reason this is its own discipline: React itself has changed
+shape under design systems over the last several years. Server Components,
+concurrent rendering, and the new hydration model didn't exist when
+Material-UI, Ant Design, or Chakra UI's original APIs were designed. Every
+actively maintained design system has had to retrofit answers to "is this a
+Server Component?" and "does this API work under React 18/19's concurrent
+scheduler?" onto an API surface built before either question existed. A
+design system that answers these questions up front — like newer projects
+such as [Radix UI](/chapters/case-studies), Base UI, and React Aria
+Components — gives every consuming team a meaningfully better default
+experience than one that treats them as an afterthought.
 
 ## Historical Context
 
-Class components and the pre-Hooks era pushed cross-cutting state (theme,
-locale, form state) through either prop drilling or third-party state
-libraries, because `Context` before React 16.3 was an unofficial, unstable
-API. The 16.3 `Context` API (`React.createContext`) made Context safe and
-idiomatic, and design systems adopted it immediately for exactly the
-use case it was built for: low-frequency, broadly-consumed values like theme
-and locale. Hooks (16.8) then made local compound-component state trivial to
-share via `useContext` instead of the older render-prop or
-higher-order-component patterns Material-UI and others had used up to that
-point — this is why you'll see older design system source code full of
-`withStyles(Component)` HOC wrappers that newer versions replaced with hooks.
+Before Hooks, class components pushed shared state (theme, locale, form
+state) through prop drilling or third-party state libraries, because
+`Context` (before React 16.3) was an unofficial, unstable API. React 16.3's
+official `Context` API (`React.createContext`) made Context safe to use, and
+design systems adopted it right away for the use case it was built for:
+values that are read broadly but change rarely, like theme and locale.
+Hooks (React 16.8) then made it easy to share local, compound-component
+state via `useContext`, replacing the older render-prop and
+higher-order-component patterns Material-UI and others had relied on — this
+is why older design system code is full of `withStyles(Component)`
+wrappers that newer versions replaced with hooks.
 
-React 18 (2022) is the real inflection point for this chapter. It shipped
+React 18 (2022) is the real turning point for this chapter. It shipped
 automatic batching (fewer re-renders by default), the concurrent renderer
-(the prerequisite for `useTransition` and `Suspense` for data), and a new
-streaming SSR architecture (`renderToPipeableStream`) that changed how
-hydration mismatches surface and how much of a page can start rendering
-before all data is ready. React 19 (2024) shipped Server Components as a
-stable, framework-integrated primitive (via Next.js's App Router and other
-RSC-compatible frameworks) — which is the first time "should this design
-system component be a Server Component?" became a question every component
-API designer has to answer, not just an experimental one. Design systems
-built or substantially revised after 2023 — Radix Themes, Base UI, Park UI
-(built on Panda CSS, see [Chapter 6](/chapters/styling-architecture)) — treat
-RSC-compatibility as a first-class constraint on the API design, not a
-migration bolted on afterward.
+(which `useTransition` and `Suspense` for data both depend on), and a new
+streaming SSR (server-side rendering) architecture
+(`renderToPipeableStream`) that changed how hydration mismatches show up and
+how much of a page can start rendering before all its data is ready. React
+19 (2024) shipped Server Components as a stable, framework-integrated
+feature (via Next.js's App Router and similar frameworks) — the first time
+"should this design system component be a Server Component?" became a
+question every component API designer has to answer, not just an
+experimental one. Design systems built or heavily revised after 2023 —
+Radix Themes, Base UI, Park UI (built on Panda CSS, see
+[Chapter 6](/chapters/styling-architecture)) — treat RSC (React Server
+Component) compatibility as a core requirement of their API design, not
+something bolted on later.
 
 ## How It Works Internally
 
-To make good decisions here you need a working mental model of four
-mechanisms: Context propagation, the render/commit cycle, the Server/Client
-Component boundary, and hydration.
+To make good decisions here, you need a working mental model of four
+mechanisms: Context propagation, the render/commit cycle, the
+Server/Client Component boundary, and hydration.
 
 **Context propagation.** When a `Context.Provider`'s `value` prop changes
-(by reference — Context does not deep-compare), React schedules a re-render
-for every component that calls `useContext` on that context, *regardless of
-whether that component's own props or state changed*. Crucially, this
-re-render bypasses `React.memo` on the *consumer* — memoizing a component
-does not stop it from re-rendering when a context it reads changes, because
-`useContext` subscribes independently of the props/state diff `memo`
+(by reference — Context does not deep-compare it), React re-renders every
+component that calls `useContext` on that context, *whether or not that
+component's own props or state changed*. Crucially, this re-render skips
+right past `React.memo` on the *consumer* — memoizing a component does not
+stop it from re-rendering when a context it reads changes, because
+`useContext` subscribes independently of the props/state check `memo`
 performs. This is the single most common design-system performance bug:
 wrapping a `MenuItem` in `React.memo` and being confused why it still
-re-renders on every keystroke in a searchable menu, when the actual cause is
-that it reads `useContext(MenuContext)` and the provider's `value` is a new
-object literal on every parent render.
+re-renders on every keystroke in a searchable menu — when the real cause is
+that it reads `useContext(MenuContext)`, and the provider hands it a new
+object literal as `value` on every parent render.
 
 **Render vs. commit.** React's render phase (calling your function
-components to produce a new element tree) is not the same as the commit
-phase (applying the diff to the DOM). Memoization tools (`React.memo`,
+components to build a new element tree) is not the same as the commit phase
+(applying the resulting diff to the DOM). Memoization tools (`React.memo`,
 `useMemo`, `useCallback`) only affect the render phase — they let React skip
-*calling* a component or *recomputing* a value, they do nothing to the
-commit phase. This matters because the "waste" from an unnecessary render is
-not primarily DOM mutation (React's diffing means an unchanged subtree
-commits nothing), it's the JavaScript execution cost of re-running component
-functions, re-running hooks, and re-diffing children — which for a design
-system with hundreds of live instances on a page is where the wasted time
-actually goes.
+*calling* a component or *recomputing* a value. They do nothing to the
+commit phase. This matters because the "waste" from an unnecessary render
+usually isn't DOM work at all — React's diffing means an unchanged subtree
+commits nothing to the DOM. The real cost is the JavaScript work: re-running
+component functions, re-running hooks, re-diffing children. For a design
+system with hundreds of live instances on a page, that JavaScript cost is
+where the wasted time actually goes.
 
-**The Server/Client boundary.** Under RSC, the module graph is bifurcated at
-build time by the `"use client"` directive. A file with that directive at
-the top, and everything it imports, gets bundled for the client and
-hydrated in the browser. A file without it is a Server Component: it
-executes once on the server (or at build time for static routes), produces
-a serialized description of its output, and ships *zero* JavaScript for
-itself to the client. The critical internal rule: a Server Component can
-import and render a Client Component, but a Client Component cannot import
-a Server Component directly — it can only receive one as `children` or
-another prop passed down from a Server Component ancestor. This asymmetry is
-why the boundary should sit as low in the tree as possible: every Client
-Component you declare drags its entire import subtree into the client
-bundle, so a `"use client"` directive placed on a component that only needs
-it for one `onClick` handler forces its whole visual subtree — icons, text
-formatting helpers, layout children — into that bundle too, unless that
-subtree is deliberately restructured to be passed in as `children` from a
-Server Component parent.
+**The Server/Client boundary.** Under RSC, the module graph is split at
+build time by the `"use client"` directive. Any file with that directive at
+the top — plus everything it imports — gets bundled for the browser and
+hydrated on the client. A file without the directive is a Server Component:
+it runs once on the server (or at build time, for static routes), produces
+a serialized description of its output, and ships *zero* JavaScript to the
+client for itself. The critical rule: a Server Component can import and
+render a Client Component, but a Client Component cannot directly import a
+Server Component — it can only receive one as `children` or another prop
+passed down from a Server Component ancestor. This is why the client
+boundary should sit as low in the tree as possible: every Client Component
+you declare pulls its entire import subtree into the client bundle. Adding
+`"use client"` to a component just because it needs one `onClick` handler
+drags its whole visual subtree — icons, text-formatting helpers, layout
+children — into that bundle too, unless you deliberately restructure that
+subtree to be passed in as `children` from a Server Component parent.
 
 **Hydration.** On the client, React walks the server-rendered DOM and the
-client render output *in lockstep*, attempting to reuse existing DOM nodes
-and attach event listeners rather than re-creating markup. It compares the
-first client render's output against what the server sent down (embedded as
-the initial HTML) node by node. If they diverge — different text content,
+client's own render output *in lockstep*, trying to reuse existing DOM nodes
+and attach event listeners instead of re-creating markup from scratch. It
+compares the first client render's output, node by node, against what the
+server sent down as the initial HTML. If they diverge — different text,
 different attributes, a different element type — React logs a hydration
-mismatch, discards the mismatched subtree (or, depending on the mismatch's
-location and React's error-recovery heuristics, the whole tree), and
-re-renders it client-side from scratch, discarding whatever performance
-benefit SSR was supposed to provide for that subtree.
+mismatch, throws away the mismatched subtree (or, in some cases, the whole
+tree), and re-renders it from scratch on the client. That wastes whatever
+performance benefit server-side rendering was supposed to provide for that
+subtree.
 
 ## Architecture
 
-The following diagram shows how these four mechanisms compose in a typical
+The diagram below shows how these four mechanisms fit together on a typical
 design-system-consuming page: a Server Component root, a client-boundary
 `ThemeProvider`, a compound component with its own internal context, and a
 Suspense boundary around an async leaf.
@@ -193,49 +208,50 @@ graph TD
   J -.streams in.-> I
 ```
 
-Read this diagram as: the page itself and most static content stay Server
-Components (zero client JS), the client boundary is pushed down to exactly
-the components that need interactivity or state (`ThemeProvider`,
-`Combobox`), the compound component's internal state lives in its own
-narrow context rather than leaking into the page's state, and an async leaf
-is wrapped in `Suspense` so its fallback can stream in without blocking the
-rest of the page. This is the shape every subsequent section in this
-chapter is arguing toward.
+Read this diagram top to bottom: the page itself and most static content
+stay Server Components (zero client JavaScript). The client boundary is
+pushed down to exactly the components that need interactivity or state
+(`ThemeProvider`, `Combobox`). The compound component's internal state lives
+in its own narrow context instead of leaking into the page's state. An
+async leaf is wrapped in `Suspense` so its fallback can stream in without
+blocking the rest of the page. This is the shape every other section in
+this chapter is arguing toward.
 
 ## Real-World Example
 
 Radix UI's `Select` and `DropdownMenu` primitives are the reference
 implementation for the context-splitting and memoization patterns in this
-chapter: each compound component ships its own tightly-scoped context
-(`createSelectContext`, `createDropdownMenuContext`) rather than a single
-shared "design system context," so a `Select`'s open/close state changes
-never re-render an unrelated `DropdownMenu` on the same page, and each
-context's value is only recomputed when its specific slice of state changes.
-React Aria Components (Adobe's headless library, and the successor pattern
-Adobe's own [Spectrum](/chapters/case-studies) is migrating toward) goes
-further and exposes a *render props* API (`children` as a function receiving
-state) specifically to avoid forcing consumers through Context subscription
-at all for simple cases — you get the current state as an argument instead
-of subscribing to a provider, which sidesteps context re-render fan-out
-entirely for components that don't need persistent shared state.
+chapter. Each compound component ships its own narrowly-scoped context
+(`createSelectContext`, `createDropdownMenuContext`) instead of one shared
+"design system context." That means a `Select`'s open/close state changing
+never re-renders an unrelated `DropdownMenu` on the same page, and each
+context's value only recomputes when its specific slice of state changes.
+React Aria Components (Adobe's headless library, and the pattern Adobe's
+own [Spectrum](/chapters/case-studies) is migrating toward) goes further:
+it offers a *render props* API (`children` as a function that receives
+state) specifically to avoid forcing consumers into a Context subscription
+at all for simple cases. You get the current state as a plain function
+argument instead of subscribing to a provider — which avoids Context
+re-render fan-out entirely for components that don't need persistent shared
+state.
 
-On the Server Components side, shadcn/ui's popularization of the
-"copy-paste, not npm-install" distribution model was driven partly by this
-exact problem: because consumers own the source in their own repo, they can
-freely choose which of a component's parts are Server vs Client Components
-for their specific app, instead of inheriting one library author's
-one-size-fits-all `"use client"` boundary. Vercel's own component
-examples and the Next.js documentation consistently model this by pushing
-`"use client"` down to a small `<Interactive>` wrapper around, say, a
-`<Tooltip>`'s trigger, while the tooltip's static content stays server
-rendered.
+On the Server Components side, shadcn/ui's "copy-paste, not npm-install"
+distribution model was driven partly by this exact problem. Because
+consumers own the source code in their own repo, they can freely decide
+which parts of a component are Server vs. Client Components for their own
+app, instead of inheriting one library author's one-size-fits-all `"use
+client"` boundary. Vercel's own component examples and the Next.js docs
+consistently model this by pushing `"use client"` down to a small
+`<Interactive>` wrapper around, say, a `<Tooltip>`'s trigger, while the
+tooltip's static content stays server-rendered.
 
 ## Implementation Example
 
 ### Context, scoped correctly
 
-A theme provider is the canonical "yes, use Context" case: the value is
-read broadly, changes rarely, and prop-drilling it would be absurd.
+A theme provider is the textbook "yes, use Context" case: the value is read
+broadly, changes rarely, and prop-drilling it through every component would
+be absurd.
 
 ```tsx
 // theme-context.tsx
@@ -285,8 +301,8 @@ export function useSetTheme() {
 
 ### Compound component internal state — the case for Context
 
-`Tabs` is the canonical compound-component case: `Tabs.List`, `Tabs.Trigger`,
-and `Tabs.Content` need to agree on which tab is active without the
+`Tabs` is the textbook compound-component case: `Tabs.List`, `Tabs.Trigger`,
+and `Tabs.Content` all need to agree on which tab is active, without the
 consumer manually wiring `active`/`onClick` props onto every child.
 
 ```tsx
@@ -371,11 +387,11 @@ export function Content({ value, children }: { value: string; children: ReactNod
 }
 ```
 
-This is the exact compound-component shape discussed in
-[Chapter 3](/chapters/component-architecture) — the point here is narrower:
-the context is *private* to this file, scoped per-`Root`-instance, and
-carries only what `Trigger`/`Content` need, not the whole design system's
-state.
+This is the same compound-component shape covered in
+[Chapter 3](/chapters/component-architecture). The point here is narrower:
+the context is *private* to this file, scoped to one `Root` instance, and
+carries only what `Trigger`/`Content` actually need — not the whole design
+system's state.
 
 ### Memoizing a leaf primitive — why it's higher leverage here than in app code
 
@@ -693,69 +709,70 @@ export function RelativeTime({ dateTime }: { dateTime: string }) {
 ```
 
 <Callout type="tip" title="suppressHydrationWarning is a scalpel, not a bandage">
-  `suppressHydrationWarning` only silences the warning for the exact DOM
-  node it's applied to, one level deep — it does not suppress React's
-  discard-and-re-render behavior for mismatched children, and it does
-  nothing at all for structural mismatches (different tag, different
-  number of children). Legitimate uses are narrow: a `<time>` element whose
-  text content is expected to differ (timestamp formatting, as above) where
-  you've deliberately decided the flash is acceptable. Reaching for it to
-  silence a mismatch caused by a `window` check or `Math.random()` is
-  treating the symptom — fix the actual source of non-determinism instead.
+  `suppressHydrationWarning` only silences the warning for the one DOM node
+  it's applied to, one level deep. It does not stop React from discarding
+  and re-rendering mismatched children, and it does nothing for structural
+  mismatches (a different tag, a different number of children). Legitimate
+  uses are narrow: a `<time>` element whose text is expected to differ
+  (timestamp formatting, as shown above), where you've decided the visible
+  flash is an acceptable tradeoff. Using it to silence a mismatch caused by
+  a `window` check or `Math.random()` just hides the symptom — fix the real
+  source of non-determinism instead.
 </Callout>
 
 ## Advantages
 
-Getting this architecture right buys a design system several compounding
-wins. Context splitting turns an O(n) re-render fan-out (every consumer of a
-monolithic context re-renders on any change) into an O(1) one (only actual
-subscribers of the changed slice re-render), and because design system
-context providers sit above entire applications, this difference is often
-the entire performance story for a page. Correctly-scoped memoization on
-leaf primitives means the design system team can absorb the cost of getting
-memoization right *once*, centrally, instead of every consuming team having
-to remember to wrap their own usage in `memo`. Pushing the Server/Client
-boundary down means consumers on RSC-capable frameworks get a meaningfully
-smaller client bundle for free — measured in real migrations, moving
-primarily-presentational primitives (`Card`, `Badge`, `Avatar` markup,
-`Divider`) out of the client bundle has shaved tens to low hundreds of KB
-off first-load JS for consumers who otherwise imported the whole library as
-client code. `Suspense` and `useTransition` let async and expensive UI
-degrade gracefully — a slow avatar image or a 10,000-option filter no longer
-blocks the rest of the page or the keystroke that triggered it. And
-hydration-safe patterns (`useId`, deferred relative-time rendering) mean
-consuming teams stop filing "flash of wrong content" and "hydration mismatch
-warning spam in the console" bugs against components they didn't write and
-can't easily debug themselves.
+Getting this architecture right buys a design system several wins that
+compound over time. Splitting Context turns an O(n) re-render problem
+(every consumer of one monolithic context re-renders on any change) into an
+O(1) one (only the actual subscribers of the changed slice re-render) —
+and because design system context providers sit above entire applications,
+this difference is often the whole performance story for a page.
+Correctly-scoped memoization on leaf primitives means the design system
+team pays the cost of getting memoization right *once*, centrally — instead
+of every consuming team having to remember to wrap their own usage in
+`memo`. Pushing the Server/Client boundary down means consumers on
+RSC-capable frameworks get a smaller client bundle for free. In real
+migrations, moving mostly-presentational primitives (`Card`, `Badge`,
+`Avatar` markup, `Divider`) out of the client bundle has shaved tens to low
+hundreds of KB off first-load JavaScript for consumers who used to import
+the whole library as client code. `Suspense` and `useTransition` let async
+and expensive UI degrade gracefully — a slow avatar image or a 10,000-option
+filter no longer blocks the rest of the page or the keystroke that
+triggered it. And hydration-safe patterns (`useId`, deferred relative-time
+rendering) mean consuming teams stop filing "flash of wrong content" and
+"hydration mismatch warning spam" bugs against components they didn't write
+and can't easily debug themselves.
 
 ## Disadvantages
 
-None of this is free. Splitting one context into several means more
-provider nesting, more files, and a steeper onboarding curve for engineers
-new to the codebase who now have to learn *which* context holds *which*
-slice of state instead of one obvious `DesignSystemContext`. Aggressive
-memoization has a real maintenance cost: `useCallback`/`useMemo` dependency
-arrays are a common source of stale-closure bugs, and profiling has to
-justify each one — memoizing something that re-renders cheaply anyway adds
-comparison overhead for no benefit. The Server/Client boundary decision is
-not a one-time cost; every new feature added to a "Server Component-safe"
-primitive has to be re-evaluated for whether it introduces a client-only
-dependency (an event handler, a browser API, a stateful hook), and getting
-this wrong produces a build-time error that's confusing to engineers who
-don't yet have a mental model of the RSC module graph. `useTransition` and
-`Suspense` both require the whole team to understand React's concurrent
-rendering model well enough to reason about when a component can be
-interrupted mid-render — a component with a side effect that assumes it
-runs to completion (a non-idempotent effect, a mutation inside render) can
-produce subtly wrong behavior under concurrent rendering that only shows up
-under real user interaction patterns, not in a quick manual test.
+None of this comes for free. Splitting one context into several means more
+provider nesting, more files, and a steeper learning curve for engineers new
+to the codebase, who now have to learn *which* context holds *which* slice
+of state instead of one obvious `DesignSystemContext`. Aggressive
+memoization has a real maintenance cost too: `useCallback`/`useMemo`
+dependency arrays are a common source of stale-closure bugs, and every one
+should be justified by profiling — memoizing something that already renders
+cheaply just adds comparison overhead for no benefit. The Server/Client
+boundary decision isn't a one-time cost either. Every new feature added to
+a "Server Component-safe" primitive has to be re-checked for whether it
+introduces a client-only dependency (an event handler, a browser API, a
+stateful hook), and getting this wrong produces a build-time error that
+confuses engineers who don't yet have a mental model of the RSC module
+graph. `useTransition` and `Suspense` both require the whole team to
+understand React's concurrent rendering model well enough to reason about
+when a component's render can be interrupted mid-way — a component with a
+side effect that assumes it always runs to completion (a non-idempotent
+effect, a mutation inside render) can behave subtly wrong under concurrent
+rendering in ways that only show up under real user interaction, not a
+quick manual test.
 
 ## Alternatives
 
-The recurring decision this chapter is really about is: *how should state be
-shared across a component tree, and where should the client/server line
-be drawn?* For state sharing specifically, Context is the React-native
-default, but it's not the only option a design system team reaches for.
+The recurring decision this chapter is really about is: *how should state
+be shared across a component tree, and where should the client/server line
+be drawn?* For sharing state specifically, Context is React's built-in
+default, but it isn't the only option a design system team reaches for.
 
 | Dimension | React Context | External store (Zustand/Jotai) | Prop drilling / composition | `useSyncExternalStore` custom store |
 | --- | --- | --- | --- | --- |
@@ -771,99 +788,99 @@ default, but it's not the only option a design system team reaches for.
 | When NOT to choose it | High-frequency updates (drag position, live text input) shared broadly | Introduces a dependency the design system now owns the version/bundle-size cost of | Deep compound components (`Tabs`, `Menu`) — becomes unmaintainable past 2-3 levels | Building it yourself when a well-tested library already solves the same problem |
 
 In practice, most design systems use Context for everything genuinely
-internal to a compound component (this is close to unanimous — Radix,
-React Aria, Ariakit, Chakra, MUI's unstyled base all do this) and reach for
-an external store only for cross-cutting, app-shaped state that the design
-system needs to *observe* rather than own — a global toast/notification
-queue is the most common example, because toasts are triggered from
-anywhere in the app, not from within a single compound component's subtree,
-which is precisely the shape Context handles badly (every toast-triggering
-component would need to be a descendant of the toast provider, which isn't
-true in a real app). Large companies with framework flexibility requirements
-(Shopify's Polaris, Atlassian's Design System) lean toward keeping the
-dependency graph minimal and use plain Context plus `useReducer` for
-anything more complex than a single piece of state, specifically because an
-external store dependency becomes a version-compatibility burden multiplied
-across every consuming team the moment it's baked into the library's own
-`package.json` dependencies rather than left as a peer choice for the
-consumer's app-level state.
+internal to a compound component. This is close to unanimous — Radix,
+React Aria, Ariakit, Chakra, and MUI's unstyled base all do it. They reach
+for an external store only for cross-cutting, app-shaped state that the
+design system needs to *observe* rather than own. A global toast or
+notification queue is the most common example: toasts get triggered from
+anywhere in the app, not from within a single compound component's
+subtree, which is exactly the shape Context handles badly — every
+toast-triggering component would need to be a descendant of the toast
+provider, which isn't true in a real app. Large companies with framework
+flexibility requirements (Shopify's Polaris, Atlassian's Design System)
+lean toward keeping the dependency graph minimal, using plain Context plus
+`useReducer` for anything more complex than a single piece of state. The
+reason: an external store dependency becomes a version-compatibility burden
+multiplied across every consuming team the moment it's baked into the
+library's own `package.json`, rather than left as a choice the consumer
+makes for their own app-level state.
 
 ## Tradeoffs
 
-Every decision in this chapter is a tradeoff between authoring simplicity
-and consumption-time performance, and the right answer skews toward
-consumption-time performance more aggressively here than in application
-code, because of the fan-out argument from the Problem Statement. Splitting
+Every decision in this chapter trades authoring simplicity against
+consumption-time performance — and the right answer here leans harder
+toward consumption-time performance than it would in application code,
+because of the fan-out argument from the Problem Statement. Splitting
 context costs the design system team an afternoon of refactoring and buys
-every consuming team a re-render fix they'll never have to think about.
-Pushing `"use client"` down costs the team a design review of "does this
-prop introduce a client dependency" on every PR, and buys every RSC-capable
-consumer a smaller bundle without them doing anything. The one place this
-logic reverses is `useTransition`/`Suspense`: these add real conceptual
-overhead (interruptible rendering, idempotency requirements) for components
-that are not actually expensive to render — a five-item `<Select>` gains
-nothing from `useTransition` and picking it up anyway just adds complexity
-consumers have to reason about for no payoff. Reserve concurrent-rendering
-APIs for the specific components where the fan-out or data size is large
-enough to matter (large `Combobox`/`Select` option lists, data-heavy
-`Table` filtering), not as a blanket default.
+every consuming team a re-render fix they'll never have to think about
+again. Pushing `"use client"` down costs the team a design review of "does
+this prop introduce a client dependency" on every PR, and buys every
+RSC-capable consumer a smaller bundle without them doing anything. The one
+place this logic flips is `useTransition`/`Suspense`: these add real
+conceptual overhead (interruptible rendering, idempotency requirements) for
+components that aren't actually expensive to render. A five-item `<Select>`
+gains nothing from `useTransition` — adopting it anyway just adds
+complexity consumers have to reason about for no payoff. Reserve
+concurrent-rendering APIs for the specific components where the fan-out or
+data size is large enough to matter (large `Combobox`/`Select` option
+lists, data-heavy `Table` filtering), not as a blanket default.
 
 ## Performance Considerations
 
-The measurable levers, in rough order of typical impact for a mature design
-system:
+The measurable levers, roughly ordered by typical impact for a mature
+design system:
 
-1. **Context granularity.** Profile with React DevTools' Profiler tab,
-   sort by "why did this render," and look specifically for components
+1. **Context granularity.** Profile with React DevTools' Profiler tab, sort
+   by "why did this render," and look specifically for components
    re-rendering with an unchanged prop diff — that's the signature of a
-   context re-render. Splitting a monolithic `DesignSystemContext` into
-   `ThemeContext` + `LocaleContext` + `DensityContext` is usually the
-   single highest-leverage fix available, because it's O(1) effort against
-   an O(n-consumers) payoff.
+   context-driven re-render. Splitting a monolithic `DesignSystemContext`
+   into `ThemeContext` + `LocaleContext` + `DensityContext` is usually the
+   single highest-leverage fix available, because it's a small, one-time
+   effort against a payoff that scales with every consumer.
 2. **Leaf memoization with measured payoff.** Memoize components that are
-   (a) rendered many times per page and (b) receive stable-ish props most of
-   the time. Icon, Avatar, Badge, Chip, table-cell-shaped primitives are the
-   textbook cases. Don't memoize components rendered once per page (a page
-   header, a modal) — there's no fan-out to recoup the comparison cost.
+   (a) rendered many times per page and (b) receive fairly stable props
+   most of the time. Icon, Avatar, Badge, Chip, and table-cell-shaped
+   primitives are the textbook cases. Don't memoize components rendered
+   once per page (a page header, a modal) — there's no fan-out to earn back
+   the comparison cost.
 3. **Bundle size via the Server/Client split.** Run a bundle analyzer
    against a consuming app before and after moving presentational
-   primitives out of `"use client"` files. This is the performance win most
-   visible to consumers in Lighthouse/Core Web Vitals scores, because it
-   directly reduces Total Blocking Time and Time to Interactive.
+   primitives out of `"use client"` files. This is the performance win
+   consumers notice most directly in Lighthouse/Core Web Vitals scores,
+   because it directly cuts Total Blocking Time and Time to Interactive.
 4. **Deferred/transitioned updates for expensive derived state.**
    `useDeferredValue` and `useTransition` don't make computation faster —
-   they make the *input handling* stay responsive while expensive
-   computation happens at lower priority. Reach for these only once
-   profiling shows an interaction (typing, filtering) is actually janky,
-   not preemptively.
-5. **Hydration cost.** Every hydration mismatch means React discards and
-   re-renders a subtree — measure this with the "Recoverable Errors"
-   reporting React 18+ exposes, not just by eyeballing the console, because
+   they keep the *input handling* responsive while expensive computation
+   happens at lower priority. Reach for these only once profiling shows an
+   interaction (typing, filtering) is actually janky, not preemptively.
+5. **Hydration cost.** Every hydration mismatch means React throws away and
+   re-renders a subtree. Measure this with the "Recoverable Errors"
+   reporting React 18+ exposes, not just by eyeballing the console —
    mismatches in production can be silently swallowed by error boundaries
    while still costing the re-render.
 
 See [Chapter 13](/chapters/performance) for the broader bundle-budget and
-virtualization discussion this plugs into.
+virtualization discussion this connects to.
 
 ## Scalability Considerations
 
-At small scale (a handful of teams, one product), a slightly-too-broad
+At small scale — a handful of teams, one product — a slightly-too-broad
 context or a missing `memo` is invisible. The problems in this chapter are
-specifically *scale* problems: they show up once a design system has enough
-consumers that (a) a single page composes dozens of instances of the same
-primitive, (b) enough different teams are building on top of the compound
-components that nobody remembers the original context shape's intent, and
-(c) the org has both RSC and non-RSC consumers simultaneously (a Next.js App
-Router app and a Vite SPA both importing the same package), which is
-increasingly the normal case for a company mid-migration. Design systems
-built to serve this kind of heterogeneous, multi-framework consumer base
-generally version their client-boundary decisions carefully — a `"use
-client"` directive removed in a minor version is technically a breaking
-change for consumers relying on tree-shaking it differently — and treat
-context-shape changes as they'd treat any other public API change, because
-compound-component context, even though it's "internal," is observable
-through behavior (whether nested instances interfere, whether SSR output
-matches).
+specifically *scale* problems. They show up once a design system has
+enough consumers that: (a) a single page uses dozens of instances of the
+same primitive, (b) enough different teams are building on the compound
+components that nobody remembers the original context shape's intent
+anymore, and (c) the org runs both RSC and non-RSC consumers at the same
+time (a Next.js App Router app and a Vite SPA both importing the same
+package) — which is an increasingly normal state for a company mid-way
+through a migration. Design systems built to serve this kind of mixed,
+multi-framework consumer base generally version their client-boundary
+decisions carefully. Removing a `"use client"` directive in a minor version
+is technically a breaking change for consumers relying on tree-shaking it
+differently. They also treat context-shape changes like any other public
+API change, because compound-component context, even though it's
+"internal," is observable through behavior — whether nested instances
+interfere with each other, whether SSR output matches.
 
 ## Common Mistakes
 
@@ -899,10 +916,10 @@ matches).
 </Callout>
 
 <Callout type="danger" title="Treating useTransition as a performance fix for slow computation">
-  `useTransition` reprioritizes *when* a render happens, it doesn't make the
+  `useTransition` reschedules *when* a render happens — it doesn't make the
   render itself faster. If filtering 50,000 items genuinely takes 400ms,
-  wrapping it in a transition keeps the input responsive but the list still
-  takes 400ms to update — the real fix is virtualization (see
+  wrapping it in a transition keeps the input responsive, but the list
+  still takes 400ms to update. The real fix is virtualization (see
   [Chapter 13](/chapters/performance)) or moving the filter off the main
   thread.
 </Callout>
@@ -910,47 +927,46 @@ matches).
 ## Best Practices
 
 - Default new context to being split by *update frequency and audience*,
-  not by "what feels like one concept" — a value that changes often (open
+  not by "what feels like one concept." A value that changes often (open
   state) and a value that changes rarely (labels, ids) belong in separate
   contexts even if they're conceptually part of "the same" compound
   component.
 - Memoize the context `value` itself with `useMemo`, and memoize consumer
-  leaf components with `React.memo`, treating these as two separate, both
-  necessary, fixes — one without the other only solves half the problem.
-- Default every new component to being a Server Component (no directive);
-  add `"use client"` only when the compiler/linter actually forces it
+  leaf components with `React.memo` — treat these as two separate fixes
+  that are both necessary. Doing only one solves half the problem.
+- Default every new component to being a Server Component (no directive).
+  Add `"use client"` only when the compiler/linter actually forces it
   (event handlers, hooks like `useState`/`useEffect`, browser APIs), and
   push that directive as far down the tree as the interactive requirement
-  actually lives, not up at the nearest convenient file.
+  actually lives — not up at the nearest convenient file.
 - Use `useId` for every generated DOM id in a shared component — never a
   module-level counter or `Math.random()`.
 - Gate any render-time environment check (`typeof window !== "undefined"`)
-  behind `useEffect` + local state, never inline in the render body.
+  behind `useEffect` plus local state, never inline in the render body.
 - Reserve `useTransition`/`useDeferredValue`/`Suspense` for components with
   measured (not assumed) cost — profile first, then apply.
 - Document the client/server boundary decision in the component's own
-  README or Storybook doc page, so consumers on RSC frameworks know without
-  reading source whether a component is safe to import into a Server
-  Component tree directly.
+  README or Storybook doc page, so consumers on RSC frameworks know
+  without reading the source whether a component is safe to import into a
+  Server Component tree directly.
 
-This dovetails with the API design principles in
+This connects to the API design principles in
 [Chapter 3](/chapters/component-architecture) — a component whose props are
 designed to avoid forcing client-only patterns (functions, class instances)
-onto every consumer stays easier to keep server-renderable as the component
-grows.
+onto every consumer stays easier to keep server-renderable as it grows.
 
 ## Interview Questions
 
 <InterviewQuestion q="A team reports that their page re-renders every design-system Button whenever an unrelated modal opens. Where do you look first?">
-  **What the interviewer is testing:** Whether you have the correct mental
-  model of Context propagation versus `React.memo`, and can diagnose from a
-  symptom back to a root cause rather than guessing at fixes.
+  **What the interviewer is testing:** Whether you have the right mental
+  model of Context propagation versus `React.memo`, and can trace a
+  symptom back to its root cause instead of guessing at fixes.
 
   **Poor answer:** "Wrap Button in `React.memo`."
 
   **Good answer:** Checks whether Button reads a shared context, and
-  whether that context's provider re-renders (and produces a new `value`
-  reference) when the modal's open state changes.
+  whether that context's provider re-renders (and hands down a new
+  `value` reference) when the modal's open state changes.
 
   **Excellent senior answer:** Explains that `memo` doesn't block
   context-driven re-renders, walks through using the React DevTools
@@ -958,12 +974,12 @@ grows.
   cause, then proposes splitting the context or memoizing the provider's
   value — and notes that if Button doesn't actually read that context,
   the fan-out is coming from somewhere else (an unmemoized parent, a new
-  `style` object prop) and describes how they'd verify which.
+  `style` object prop) and describes how they'd check which.
 
-  **Common mistakes:** Reaching for `memo` as a reflexive fix without
+  **Common mistakes:** Reaching for `memo` as a reflex fix without
   diagnosing whether the cause is Context, an unstable prop reference, or
-  actual state change; not knowing that `memo` and Context are independent
-  mechanisms.
+  an actual state change; not knowing that `memo` and Context are
+  independent mechanisms.
 </InterviewQuestion>
 
 <InterviewQuestion q="When should a design-system component be a Server Component versus a Client Component, and what happens if you get it wrong?">
@@ -1003,18 +1019,18 @@ grows.
   **Good answer:** Says it keeps the reference stable for memoized children
   (like an internal Icon) so they don't bail out of their own `memo` check.
 
-  **Excellent senior answer:** Notes the actual leverage argument — Button
+  **Excellent senior answer:** Notes the real leverage argument — Button
   itself might render in under a millisecond, but it's instantiated
   hundreds of times per page across every consumer, so a stable callback
-  reference that lets a memoized Icon skip re-render is a small win
-  multiplied by every Button on every page in every consuming app, which is
+  reference that lets a memoized Icon skip a re-render is a small win
+  multiplied by every Button on every page in every consuming app. That's
   categorically different math than the same optimization in a one-off app
   component.
 
-  **Common mistakes:** Applying `useCallback` reflexively everywhere
+  **Common mistakes:** Applying `useCallback` everywhere as a reflex
   without being able to say what specifically it prevents downstream; not
-  recognizing that `useCallback` with an empty/wrong dependency array can
-  introduce stale-closure bugs, which is the real cost side of this
+  recognizing that `useCallback` with an empty or wrong dependency array
+  can introduce stale-closure bugs, which is the real cost side of this
   tradeoff.
 </InterviewQuestion>
 
@@ -1025,16 +1041,16 @@ grows.
   **Poor answer:** "It's when the server and client don't match, wrap it in
   useEffect."
 
-  **Good answer:** Explains React compares server HTML to first client
+  **Good answer:** Explains React compares server HTML to the first client
   render node-by-node and discards mismatched subtrees, and gives an
   example like a randomly generated id or a `Date.now()`-based render.
 
   **Excellent senior answer:** Gives the `useId` fix for generated ids
-  specifically (not just "use useEffect", since `useId` solves it without
-  a client-only re-render at all), explains the relative-time pattern
-  (render deterministic value first, swap after mount), and states
-  precisely what `suppressHydrationWarning` does and does not cover — that
-  it silences the warning one node deep and doesn't fix structural
+  specifically (not just "use useEffect" — `useId` solves it without a
+  client-only re-render at all), explains the relative-time pattern
+  (render a deterministic value first, swap after mount), and states
+  precisely what `suppressHydrationWarning` does and doesn't cover — it
+  silences the warning one node deep and doesn't fix structural
   mismatches.
 
   **Common mistakes:** Treating `suppressHydrationWarning` as a general
@@ -1120,8 +1136,8 @@ grows.
 
 <ManagerQuestion q="An engineer on your team wants to add a third-party state management library as a dependency of the design system, to simplify some cross-component state. How do you evaluate that request?">
   **What the interviewer is testing:** Judgment about dependency ownership
-  and the asymmetric cost of adding dependencies to a widely-consumed
-  package versus application code.
+  and the uneven cost of adding dependencies to a widely-consumed package
+  versus application code.
 
   **Poor answer:** "If it makes the code cleaner, approve it."
 
@@ -1129,10 +1145,10 @@ grows.
   against the internal simplification, and asks whether Context can solve
   it with acceptable performance first.
 
-  **Excellent senior answer:** Frames it explicitly as: every dependency
+  **Excellent senior answer:** Frames it explicitly: every dependency
   added to the design system's `package.json` becomes every consuming
-  team's transitive dependency too, with a version this team now owns
-  keeping compatible across the whole consumer base — a cost application
+  team's transitive dependency too, with a version this team now has to
+  keep compatible across the whole consumer base — a cost application
   code doesn't pay. Distinguishes "state genuinely internal to one
   compound component" (Context, no new dependency needed) from "state that
   legitimately crosses the whole app" (a peer dependency the *consumer*
@@ -1172,23 +1188,23 @@ grows.
 
 React's default rendering model — Context propagating broadly, nothing
 memoized unless asked, a permissive client/server boundary, synchronous
-rendering — is tuned for application code, where mistakes are locally
-contained. A design system inverts that assumption: because every primitive
+rendering — is tuned for application code, where mistakes stay locally
+contained. A design system flips that assumption. Because every primitive
 is instantiated far more times than any application component, and every
 context provider sits above entire product trees, the same "good enough"
 defaults become system-wide performance and correctness bugs. The fixes are
 consistent across all four mechanisms covered here: narrow the scope of
 what re-renders (split Context by update frequency, memoize high-fan-out
-leaves), push boundaries down and out (client directives on the smallest
-possible files, `Suspense` around genuinely-async leaves only), and make
+leaves); push boundaries down and out (client directives on the smallest
+possible files, `Suspense` around genuinely-async leaves only); and make
 render output deterministic between server and client (`useId`, deferred
-non-deterministic values) rather than reaching for warning-suppression as a
+non-deterministic values) instead of reaching for warning-suppression as a
 first resort. None of these are exotic React features — every tool
 discussed here (`memo`, `useMemo`, `useCallback`, `useTransition`,
-`Suspense`, `useId`) is documented, mainstream API. The skill this chapter
-is really teaching is recognizing *which* of these problems you have from a
-symptom, and applying the fix at the layer (Context shape, boundary
-placement, determinism) that actually caused it rather than reaching for
+`Suspense`, `useId`) is documented, mainstream API. What this chapter is
+really teaching is how to recognize *which* of these problems you have from
+a symptom, and how to apply the fix at the layer (Context shape, boundary
+placement, determinism) that actually caused it, rather than reaching for
 the nearest keyword.
 
 **Key takeaways**

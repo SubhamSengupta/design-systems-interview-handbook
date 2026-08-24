@@ -6,129 +6,157 @@ export const metadata = {
 
 # 8. Testing Strategy
 
+## Quick Glance
+
+- A design system's test pyramid is shaped differently from an app's: heavy on unit, interaction, accessibility, and visual testing, and light on E2E, because components don't own routing or business logic.
+- **Unit tests** check rendering and behavior in `jsdom` (a fake DOM in Node) — fast, no real browser needed.
+- **Interaction tests** drive a component through a real sequence of events (`userEvent`) and catch focus-order/timing bugs a props-only test can't reach.
+- **Accessibility tests** (`jest-axe`/`axe-core`) mechanically check about a third of WCAG success criteria — a floor, not proof the component is accessible.
+- **Visual regression** (Chromatic, Playwright screenshots) needs a real browser because it depends on real fonts, layout, and paint — its biggest failure mode is flaky diffs from font/animation timing.
+- **Snapshot testing** is fine for small, stable output (like generated CSS variables) and an anti-pattern for full component markup, where diffs get rubber-stamped instead of read.
+- Testing Library's rule: query by role and accessible name (`getByRole`), not by CSS class or test ID — this doubles as an accessibility check.
+- If asked "why is E2E narrow here": say a design system has no user flows to test, so E2E is scoped to cross-browser rendering checks only.
+- Vitest is faster than Jest at scale mainly because it reuses the app's real Vite transform pipeline instead of a separate Babel step.
+- If asked "is a clean jest-axe report enough": no — automated tools catch the mechanical third; the rest needs a manual screen-reader/keyboard pass.
+
 ## Definition
 
-A design system's **testing strategy** is the deliberate allocation of
-test effort across layers — unit, integration, interaction, accessibility,
-and visual regression — chosen to catch the specific bug classes a
-component library actually produces, rather than mirroring the E2E-heavy
-pyramid a typical product application uses. Because a design system
-component owns *rendering, behavior, and accessibility* but not business
-logic, data fetching, or routing, the tests that catch real regressions
-are concentrated at the unit/interaction/visual layers, and end-to-end
-testing plays a narrow, specific role rather than the dominant one it
-plays in application testing.
+A design system's **testing strategy** is a deliberate choice about where
+to spend test effort: unit, integration, interaction, accessibility, and
+visual regression. The goal is to catch the specific bugs a component
+library actually produces — not to copy the E2E-heavy pyramid a typical
+product application uses.
+
+Here's why the shape is different. A design system component owns
+*rendering, behavior, and accessibility* — but not business logic, data
+fetching, or routing. So the tests that catch real regressions cluster
+around the unit, interaction, and visual layers. End-to-end (E2E) testing
+— tests that drive a real browser through a full user flow — plays a
+narrow, specific role here, instead of the dominant role it plays in
+application testing.
 
 ## Problem Statement
 
-Take the standard testing pyramid most engineers learn — lots of unit
-tests, a moderate layer of integration tests, a thin cap of expensive E2E
-tests — and apply it unmodified to a design system repo. It doesn't fit.
+Take the standard testing pyramid most engineers learn: lots of unit
+tests, a moderate layer of integration tests, and a thin cap of expensive
+E2E tests. Now apply it, unmodified, to a design system repo. It doesn't
+fit.
+
 An E2E test drives a browser through a *user flow*: log in, add an item to
-a cart, check out. A design system doesn't have user flows; it has
+a cart, check out. A design system doesn't have user flows — it has
 components with no opinion about what screen they're on or what happens
 after you click them. Writing "E2E tests" for a `Button` means either
-inventing a fake screen to put it on (testing a screen nobody ships) or
-skipping E2E almost entirely — and if a team applies the standard pyramid
-by rote, they either waste effort building fake E2E scaffolding around
+inventing a fake screen just to put it on (testing a screen nobody ships)
+or skipping E2E almost entirely.
+
+If a team applies the standard pyramid by rote, one of two bad things
+happens. Either they waste effort building fake E2E scaffolding around
 components that don't need it, or they under-invest in the layers that
-actually matter here: does this component render the right ARIA attributes
-in every state, does the visual output regress when a shared token
-changes, does keyboard navigation work exactly as documented. The
-mis-shaped pyramid isn't a nitpick — it's the difference between a test
-suite that catches the bugs a design system actually ships (broken focus
-order, a token change silently shifting spacing across forty components,
-missing `aria-invalid` on an error state) and one that gives false
-confidence while missing all three.
+actually matter: does this component render the right ARIA attributes in
+every state, does the visual output break when a shared token changes,
+does keyboard navigation work exactly as documented. This isn't a
+nitpick — it's the difference between a test suite that catches the bugs a
+design system actually ships (broken focus order, a token change quietly
+shifting spacing across forty components, a missing `aria-invalid` on an
+error state) and one that gives false confidence while missing all three.
 
 ## Why Does This Exist?
 
 The shape of a design system's test pyramid follows directly from what a
-design system component *is responsible for* versus what it explicitly is
-not. A component in `@org/design-system` typically has: props in, markup
-and behavior out, no server calls, no routing, no business rules about
-what a valid order total is. Its correctness surface is therefore rendering
-correctness (does it produce the right DOM for a given prop combination),
-behavioral correctness (does clicking/typing/pressing a key do the
-documented thing), accessibility correctness (can this be operated and
-understood via assistive technology), and visual correctness (does it
-still look right after an unrelated dependency changed). None of those
-four require a browser navigating between pages or a backend responding to
-requests — which is exactly why unit, interaction, and visual testing
-dominate, and E2E is reserved for the narrow slice of "does this render
-correctly across real browser engines" rather than "does this user flow
-work." Teams that get this wrong in either direction pay for it: too much
-E2E wastes CI minutes testing scenarios the design system doesn't own;
-too little unit/visual/interaction coverage means the bugs that *do* belong
-to this layer ship silently.
+component *is responsible for* — and what it explicitly is not. A
+component in `@org/design-system` typically has: props in, markup and
+behavior out, no server calls, no routing, no business rules about what a
+valid order total is. So its correctness has four parts:
+
+- **Rendering correctness** — does it produce the right DOM for a given
+  set of props?
+- **Behavioral correctness** — does clicking, typing, or pressing a key do
+  the documented thing?
+- **Accessibility correctness** — can this be used and understood with
+  assistive technology?
+- **Visual correctness** — does it still look right after an unrelated
+  dependency changed?
+
+None of those four need a browser navigating between pages, or a backend
+answering requests. That's exactly why unit, interaction, and visual
+testing dominate here, and E2E is reserved for one narrow slice: "does
+this render correctly across real browser engines," not "does this user
+flow work." Teams that get this allocation wrong pay for it either way:
+too much E2E wastes CI minutes on scenarios the design system doesn't
+own; too little unit/visual/interaction coverage means the bugs that
+*do* belong to this layer ship silently.
 
 ## Historical Context
 
 Testing Library (`@testing-library/react`), released in 2018 by Kent C.
-Dodds, was the pivotal shift for this whole layer — it replaced Enzyme's
-implementation-detail-centric API (`wrapper.state()`, `wrapper.find('.btn')`
-matching CSS classes) with an accessibility-tree-centric one
-(`getByRole`, `getByLabelText`). This wasn't a stylistic preference; it
-directly caused component tests to start catching accessibility
-regressions as a side effect of normal behavioral testing, because a test
-that can't find your button by its accessible role is telling you
-something a screen reader user would also struggle with. Jest snapshot
-testing, popularized around the same era, initially looked like it solved
-"regression testing for UI" cheaply — render a component, serialize the
-output, diff it — but the industry spent the following several years
-learning its failure mode in practice: developers rubber-stamp large,
-unreadable diffs without reading them, and a snapshot changing doesn't
-distinguish "a real regression" from "an intentional change," which is
-covered in depth below. Percy (2016) and later Chromatic (Storybook's own
-visual regression product, mainstreamed alongside CSF around 2019–2021)
-answered a version of the same problem — "how do I know the DOM output is
-still visually correct" — but pixel-diffing instead of markup-diffing,
-which sidesteps snapshot testing's biggest failure mode (illegible diffs)
-at the cost of a new one (flaky diffs from rendering nondeterminism,
-covered below). Vitest, released in 2021 alongside Vite's rise, is the
-most recent major shift: a Jest-API-compatible test runner built on native
-ESM and Vite's transform pipeline, which large monorepos have adopted
-specifically for the speed difference at scale — this is covered in detail
-in its own section below.
+Dodds, was the turning point for this whole area. It replaced Enzyme's
+API, which focused on implementation details (`wrapper.state()`,
+`wrapper.find('.btn')` matching CSS classes), with one centered on the
+accessibility tree (`getByRole`, `getByLabelText`). This wasn't just a
+style preference — it directly made component tests start catching
+accessibility regressions as a side effect of normal behavior testing.
+If a test can't find your button by its accessible role, that's telling
+you something a screen reader user would also struggle with.
+
+Jest snapshot testing, popular around the same time, initially looked
+like a cheap fix for "regression testing for UI": render a component,
+save the output, diff it against future runs. But the industry spent the
+next several years learning its failure mode in practice. Developers
+rubber-stamp large, unreadable diffs without reading them, and a snapshot
+changing doesn't tell you whether it's "a real regression" or "an
+intentional change" — covered in depth below.
+
+Percy (2016) and later Chromatic (Storybook's own visual regression
+product, which became mainstream alongside CSF around 2019–2021)
+answered a related problem — "how do I know the DOM output still looks
+right" — but by diffing pixels instead of markup. That sidesteps
+snapshot testing's biggest failure (unreadable diffs) at the cost of a
+new one (flaky diffs from rendering that isn't perfectly consistent run
+to run, covered below).
+
+Vitest, released in 2021 alongside Vite's rise, is the most recent big
+shift: a test runner with a Jest-compatible API, built on native ESM
+(the browser's built-in module system) and Vite's own transform
+pipeline. Large monorepos have adopted it specifically for the speed
+difference at scale — covered in detail in its own section below.
 
 ## How It Works Internally
 
-The mechanism that makes this whole layer coherent is that every tool
-here operates on **the same rendered output** — a component tree mounted
-via `render()` from Testing Library, whether that render happens in a
-headless DOM (`jsdom`/`happy-dom`, for unit and interaction tests), a real
-browser (Playwright, for E2E and browser-mode Vitest), or Storybook's
-preview iframe (for visual regression and Storybook-hosted interaction
-tests, see [Chapter 7](/chapters/storybook)). What differs between layers
-is *what's asserted against that render* and *what environment it renders
-in*:
+The mechanism that ties this whole layer together: every tool here
+operates on **the same rendered output** — a component tree mounted with
+`render()` from Testing Library. That render can happen in a headless DOM
+(`jsdom`/`happy-dom`, for unit and interaction tests), a real browser
+(Playwright, for E2E and browser-mode Vitest), or Storybook's preview
+iframe (for visual regression and Storybook-hosted interaction tests, see
+[Chapter 7](/chapters/storybook)). What differs between layers is *what
+gets checked against that render* and *what environment it renders in*:
 
-- **Unit tests** assert on the accessibility tree and DOM output for a
-  given prop combination, in `jsdom`/`happy-dom` — no real browser needed
-  because layout/paint don't matter for what's being asserted.
+- **Unit tests** check the accessibility tree and DOM output for a given
+  set of props, in `jsdom`/`happy-dom` — no real browser needed, because
+  layout and paint don't matter for what's being checked.
 - **Interaction tests** additionally *drive* the render with simulated
   real events (`userEvent`, which dispatches actual `PointerEvent`/
-  `KeyboardEvent` sequences rather than calling handlers directly) and
-  assert on the resulting DOM state after each step.
+  `KeyboardEvent` sequences instead of calling handlers directly), then
+  check the DOM state after each step.
 - **Accessibility tests** run `axe-core`'s rule engine against the
   rendered DOM to mechanically check WCAG success criteria that have a
-  programmatic check (contrast ratios computed from resolved styles,
-  ARIA attribute validity, landmark structure).
+  programmatic check — contrast ratios computed from resolved styles,
+  ARIA attribute validity, landmark structure.
 - **Visual regression tests** render in a *real* browser (Chromatic's
   cloud browsers, or Playwright's) because pixel output depends on real
   font rendering, real layout, and real paint — none of which `jsdom`
-  simulates — then diff the rendered pixels against a stored baseline
+  simulates. They then diff the rendered pixels against a stored baseline
   image.
 - **E2E tests** load the actual built package inside a real browser via
-  Playwright and assert on rendering/behavior with no mocked DOM APIs
+  Playwright and check rendering and behavior with no mocked DOM APIs
   anywhere in the stack.
 
 This is why the pyramid is shaped the way it is: each layer down from E2E
-trades away some fidelity (real browser, real paint, real event timing)
-for dramatically lower cost and higher speed, and a design system's
-correctness surface (rendering + behavior + accessibility, not business
-logic or navigation) happens to be almost entirely expressible at the
-cheap end of that tradeoff.
+trades away some realism (a real browser, real paint, real event timing)
+for much lower cost and higher speed. A design system's correctness
+surface — rendering, behavior, accessibility, not business logic or
+navigation — happens to be almost entirely testable at the cheap end of
+that tradeoff.
 
 ## Architecture
 
@@ -148,40 +176,42 @@ graph TD
   G --> J["CI: cross-browser matrix, scheduled + pre-release"]
 ```
 
-The shape to notice: five of the seven layers run on every commit because
-they're fast and don't need a real browser; visual regression is
-PR-gated specifically because it needs human judgment on the diff; E2E
-runs least frequently because it's the most expensive and narrowest in
-scope. This inverted-from-app-testing cost/frequency balance is the
-concrete expression of the "different pyramid shape" claim above.
+The shape to notice: five of the seven layers run on every commit,
+because they're fast and don't need a real browser. Visual regression is
+PR-gated specifically because it needs a human to judge the diff. E2E
+runs least often, because it's the most expensive and narrowest in scope.
+This cost/frequency balance is the opposite of a typical app's, and it's
+the concrete expression of the "different pyramid shape" idea above.
 
 ## Real-World Example
 
 Radix UI's own test suite (the primitives library many design systems
 build on top of, covered further in
-[Chapter 14](/chapters/case-studies)) is instructive precisely because
-it's almost entirely behavioral and accessibility-focused: its tests
-assert on ARIA attribute presence, focus movement, and keyboard event
-sequences for components like `Dialog` and `DropdownMenu`, with
-essentially no snapshot or visual assertions in the core package — because
-Radix ships unstyled, visual regression genuinely isn't its concern; a
-consumer's own styling layer owns that. Contrast that with Shopify's
-Polaris, which *does* ship default styling and correspondingly invests
-heavily in Chromatic visual regression across its component set — the
-testing investment tracks exactly what each library actually owns.
-Atlassian's `@atlaskit` packages are a good example of the accessibility
-layer specifically: their design system team has publicly described using
-`jest-axe` as a required check inside unit tests (not just as a separate
-audit step) so a component *cannot* merge with a missing accessible name
-or an invalid ARIA pattern, catching the issue at the same point in the
-workflow as a type error rather than in a downstream audit weeks later.
+[Chapter 14](/chapters/case-studies)) is a good example precisely because
+it's almost entirely about behavior and accessibility. Its tests check
+ARIA attribute presence, focus movement, and keyboard event sequences for
+components like `Dialog` and `DropdownMenu`, with almost no snapshot or
+visual assertions in the core package — because Radix ships unstyled, so
+visual regression genuinely isn't its concern; a consumer's own styling
+layer owns that.
+
+Contrast that with Shopify's Polaris, which *does* ship default styling
+and correspondingly invests heavily in Chromatic visual regression across
+its component set — the testing investment tracks exactly what each
+library actually owns. Atlassian's `@atlaskit` packages are a good
+example of the accessibility layer specifically: their design system team
+has publicly described using `jest-axe` as a required check inside unit
+tests, not just as a separate audit step, so a component *cannot* merge
+with a missing accessible name or an invalid ARIA pattern. That catches
+the issue at the same point in the workflow as a type error, instead of
+in a downstream audit weeks later.
 
 ## Implementation Example
 
 ### Unit testing components
 
 What's worth unit-testing on a `Button` or `Input` is behavior and
-accessibility surface, not implementation details like internal state
+accessibility surface — not implementation details like internal state
 variable names or which CSS class got applied:
 
 ```tsx
@@ -237,21 +267,21 @@ describe("Button", () => {
 });
 ```
 
-What's *not* worth testing here: the internal implementation of how
-`loading` sets `aria-busy` (an implementation detail — test the resulting
-attribute, not the code path), snapshotting the full rendered markup (see
-Snapshot Testing below for why), or re-testing that React itself calls
-`onClick` on click (that's testing React, not your component).
+What's *not* worth testing here: how `loading` internally sets
+`aria-busy` (that's an implementation detail — test the resulting
+attribute, not the code path), a snapshot of the full rendered markup
+(see Snapshot Testing below for why), or re-testing that React itself
+calls `onClick` on click (that's testing React, not your component).
 
 ### Integration testing compound components
 
 A compound component like `Tabs` — `Tabs.Root`, `Tabs.List`, `Tabs.Tab`,
 `Tabs.Panel` (see [Chapter 3](/chapters/component-architecture) for the
-compound component pattern itself) — has correctness that only exists at
-the *composition* level: which panel is visible depends on state shared
-across four separate subcomponents. Testing each subcomponent in total
-isolation can't catch a coordination bug, so integration tests render the
-whole composed unit:
+compound component pattern itself) — has correctness that only shows up
+at the *composition* level: which panel is visible depends on state
+shared across four separate subcomponents. Testing each subcomponent
+fully on its own can't catch a coordination bug, so integration tests
+render the whole composed unit:
 
 ```tsx
 // Tabs.test.tsx
@@ -299,13 +329,13 @@ describe("Tabs (integration)", () => {
 ### Interaction testing
 
 Interaction tests exist to catch a bug class unit tests structurally
-can't: bugs in *sequences* of real events — focus order across multiple
-key presses, whether a second `Enter` while a menu is animating closes it
-prematurely, whether `Tab` after selecting an option lands focus in the
-right place. The tooling is the same `userEvent` API shown above, or
-Storybook's play functions (see [Chapter 7](/chapters/storybook) for the
-play function mechanism in detail) when the scenario benefits from being
-visible/step-through-able in the Interactions panel:
+can't reach: bugs in *sequences* of real events. Focus order across
+multiple key presses. Whether a second `Enter` while a menu is animating
+closes it too early. Whether `Tab` after selecting an option lands focus
+in the right place. The tooling is the same `userEvent` API shown above,
+or Storybook's play functions (see [Chapter 7](/chapters/storybook) for
+how play functions work) when it helps to see the scenario step through
+visibly in the Interactions panel:
 
 ```tsx
 // Select.interaction.test.tsx
@@ -344,19 +374,19 @@ describe("Select keyboard interaction", () => {
 });
 ```
 
-This differs from the unit test class above in one crucial way: a unit
-test typically drives the component directly into a target state via
-props (`<Select defaultValue="us">`) and asserts on that state. An
+This differs from the unit test class above in one important way. A unit
+test typically drives the component straight into a target state via
+props (`<Select defaultValue="us">`) and checks that state. An
 interaction test insists on reaching that state through the *same event
-sequence a real keyboard user would produce*, which is precisely what
-catches order-of-operations and focus-management bugs a props-driven test
-never exercises.
+sequence a real keyboard user would produce* — which is exactly what
+catches order-of-operations and focus-management bugs that a props-driven
+test never exercises.
 
 ### Accessibility testing
 
 `jest-axe` (for Vitest/Jest unit tests) and `@axe-core/react` (for
-runtime dev-mode auditing inside an actual running app) both wrap the same
-axe-core rule engine used by Storybook's a11y addon
+runtime dev-mode auditing inside an actual running app) both wrap the
+same axe-core rule engine used by Storybook's a11y addon
 ([Chapter 7](/chapters/storybook)) and Lighthouse:
 
 ```tsx
@@ -390,32 +420,31 @@ describe("Dialog accessibility", () => {
 });
 ```
 
-<Callout type="warning" title="Automated a11y tooling has a real, quantifiable ceiling">
+<Callout type="warning" title="Automated a11y tooling has a real, measurable ceiling">
   Deque Systems' own research on axe-core — the engine behind `jest-axe`,
   `@axe-core/react`, the Storybook a11y addon, and Lighthouse — puts
-  automated coverage at roughly **20-40% of WCAG success criteria**,
-  commonly cited as "about a third." The reason is structural, not a
-  current limitation waiting to be engineered away: criteria like color
-  contrast, ARIA attribute validity, and landmark structure are
-  mechanically checkable from computed styles and the accessibility tree.
-  Criteria like "does this error message make sense when read aloud out
-  of visual context," "is this the right heading level for the actual
-  content hierarchy," or "does this custom widget's keyboard model match
-  what a screen reader user expects" require human judgment about
-  meaning and experience that a rule engine cannot evaluate. A clean
-  `jest-axe` report is a floor, not a certificate of accessibility — see
-  [Chapter 5](/chapters/accessibility) for the manual testing (screen
-  reader walkthroughs, keyboard-only passes) that closes the remaining
-  gap.
+  automated coverage at roughly **20–40% of WCAG success criteria**,
+  commonly rounded to "about a third." This is a structural limit, not a
+  gap current tools just haven't closed yet. Rules like color contrast,
+  ARIA attribute validity, and landmark structure can be checked
+  mechanically from computed styles and the accessibility tree. But
+  questions like "does this error message make sense when read aloud out
+  of context," "is this the right heading level for the actual content,"
+  or "does this custom widget's keyboard model match what a screen reader
+  user expects" need human judgment about meaning — something a rule
+  engine can't evaluate. A clean `jest-axe` report is a floor, not proof
+  of accessibility. See [Chapter 5](/chapters/accessibility) for the
+  manual testing (screen reader walkthroughs, keyboard-only passes) that
+  closes the remaining gap.
 </Callout>
 
 ### Visual regression testing
 
 Visual regression tools (Chromatic, Percy, Playwright's
-`toHaveScreenshot()`) all follow the same mechanical pattern: render the
-component/story in a real browser, capture a screenshot, and compute a
-pixel- or perceptual-diff against a stored baseline image for that exact
-scenario:
+`toHaveScreenshot()`) all follow the same basic pattern: render the
+component or story in a real browser, capture a screenshot, and compare
+it — pixel by pixel, or with a perceptual diff — against a stored
+baseline image for that exact scenario:
 
 ```tsx
 // Card.visual.spec.ts — Playwright screenshot testing
@@ -435,29 +464,32 @@ test.describe("Card visual regression", () => {
 });
 ```
 
-The mechanism is straightforward; the practical failure mode is not.
-**Font rendering and animation timing are the number-one cause of flaky
-visual diffs** — a screenshot taken one frame before a web font finishes
+The mechanism is simple; the practical failure mode is not. **Font
+rendering and animation timing are the number-one cause of flaky visual
+diffs.** A screenshot taken one frame before a web font finishes
 swapping, or mid-transition on a hover/focus animation, produces a "diff"
-that's really just timing noise, and a team that doesn't address this
-quickly trains itself to ignore visual regression alerts entirely (the
-same failure mode described for Chromatic in
-[Chapter 7](/chapters/storybook)). The standard mitigations, in order of
-impact: disable CSS transitions/animations in the test environment (a
-global `* { animation: none !important; transition: none !important; }`
-injected only for visual test runs), explicitly wait for
-`document.fonts.ready` before capturing, pin to a small, controlled set of
-target browsers/viewports rather than the full real-world matrix, and
-freeze any non-deterministic content (relative timestamps, random IDs,
-locale-dependent number formatting) with fixed test fixtures.
+that's really just timing noise. A team that doesn't fix this quickly
+trains itself to ignore visual regression alerts entirely (the same
+failure mode described for Chromatic in
+[Chapter 7](/chapters/storybook)). The standard fixes, in order of
+impact:
+
+- Disable CSS transitions and animations in the test environment (inject
+  a global `* { animation: none !important; transition: none !important; }`
+  only for visual test runs).
+- Explicitly wait for `document.fonts.ready` before capturing.
+- Pin to a small, controlled set of target browsers/viewports instead of
+  the full real-world matrix.
+- Freeze any non-deterministic content — relative timestamps, random IDs,
+  locale-dependent number formatting — with fixed test fixtures.
 
 ### Snapshot testing
 
-Jest/Vitest **snapshot testing** — render a component, serialize its
-output to a text file, and fail the test if a future render produces
-different serialized output — looked like an easy win for UI regression
-testing when it was introduced, and the industry's experience with it at
-scale surfaced two specific, well-documented pitfalls:
+Jest/Vitest **snapshot testing** works like this: render a component,
+save its output as text, and fail the test if a future render produces
+different output. It looked like an easy win for UI regression testing
+when it was introduced. The industry's experience with it at scale
+surfaced two specific, well-documented problems:
 
 ```tsx
 // Anti-pattern: a full-markup snapshot that will churn on every
@@ -468,40 +500,40 @@ it("matches snapshot", () => {
 });
 ```
 
-The first pitfall is **blind approval**: a diff spanning fifty lines of
-serialized markup is not something a human reliably reads line-by-line
-under PR review pressure — in practice, `git commit` / `jest -u` becomes a
-reflex, and the "test" stops providing any signal at all, positive or
-negative. The second is **asserting structure instead of behavior**: a
-snapshot of full markup breaks on *any* markup change, including entirely
-correct, intentional ones (adding a wrapper `<div>` for a new feature),
-which means the test can't distinguish "this is a regression" from "this
-is expected" — it just says "something changed," and the human has to do
-all the actual reasoning the test should have done. This is close to the
-opposite of what a good test should do: a good test fails specifically
-when behavior is wrong, and stays green through refactors that preserve
-behavior.
+The first problem is **blind approval**: a diff spanning fifty lines of
+saved markup isn't something a human reliably reads line-by-line under PR
+review pressure. In practice, `git commit` / `jest -u` becomes a reflex,
+and the "test" stops giving any real signal, positive or negative.
 
-Where snapshot testing is genuinely useful is **narrow, deliberately
-scoped snapshots of stable, meaningful output** — a design token
-transformation's generated CSS variables, a component's resolved
-`className` string composition logic, a small serialized object with a
-handful of fields — where the surface is small enough that a diff is
-actually readable and the thing being snapshotted has a low, predictable
-rate of intentional change. The rule of thumb: if a snapshot diff would
-take more than a few seconds to actually evaluate, it's testing structure,
-not behavior, and should be replaced with an explicit assertion (`expect
-(button).toHaveAttribute("aria-busy", "true")` instead of a full-markup
-snapshot of the same button).
+The second problem is **testing structure instead of behavior**: a
+snapshot of full markup breaks on *any* markup change, including
+correct, intentional ones (adding a wrapper `<div>` for a new feature).
+That means the test can't tell "this is a regression" from "this is
+expected" — it just says "something changed," and a human has to do all
+the actual reasoning the test should have done. That's close to the
+opposite of what a good test should do: a good test fails specifically
+when behavior is wrong, and stays green through refactors that keep
+behavior the same.
+
+Snapshot testing is genuinely useful in one narrow case: **small,
+stable, meaningful output** — a design token transformation's generated
+CSS variables, a component's resolved `className` string, a small
+serialized object with a handful of fields. Here the surface is small
+enough that a diff is actually readable, and the thing being snapshotted
+rarely changes on purpose. The rule of thumb: if a snapshot diff would
+take more than a few seconds to actually check, it's testing structure,
+not behavior — replace it with an explicit assertion (`expect(button)
+.toHaveAttribute("aria-busy", "true")` instead of a full-markup snapshot
+of the same button).
 
 ### Playwright
 
 Playwright's role in a design system repo is deliberately **narrower**
-than in an application repo: not user flows (a design system has none),
-but **cross-browser rendering checks** — confirming that CSS actually
-computes and paints consistently across Chromium, Firefox, and WebKit,
-which `jsdom`-based unit tests cannot verify at all since `jsdom` doesn't
-implement real layout or paint.
+than in an application repo. It's not testing user flows — a design
+system has none — it's doing **cross-browser rendering checks**:
+confirming CSS actually computes and paints consistently across
+Chromium, Firefox, and WebKit. `jsdom`-based unit tests can't verify this
+at all, since `jsdom` doesn't implement real layout or paint.
 
 ```ts
 // cross-browser.spec.ts
@@ -527,8 +559,8 @@ for (const browserName of ["chromium", "firefox", "webkit"] as const) {
 
 This is also where Storybook's own **test runner** (mentioned in
 [Chapter 7](/chapters/storybook)) sits — it's Playwright under the hood,
-executing every story's play function headlessly across real browser
-engines in CI, which is the closest a design system gets to "E2E" without
+running every story's play function headlessly across real browser
+engines in CI. It's the closest a design system gets to "E2E" without
 inventing a fake application to test against.
 
 ### Vitest vs Jest
@@ -563,26 +595,27 @@ export default defineConfig({
 | When to choose it | New project already on Vite, or a large monorepo where transform/startup speed is a measured pain point | Existing large Jest suite with no acute speed problem, or dependency on a Jest-only plugin |
 | When NOT to choose it | Deep dependency on a Jest-specific plugin with no Vitest equivalent yet | Starting fresh on Vite with no legacy Jest investment — there's no longer a strong reason to pick Jest new |
 
-The practical migration driver, concretely: teams don't move to Vitest
-because "it's newer," they move because a large monorepo's Jest suite's
-transform step (Babel or `ts-jest` re-parsing and re-transforming
-TypeScript on every run) becomes measurably slow — cold start and watch
-mode both — while Vitest reuses the exact same Vite pipeline the app
+The real driver behind migrations, concretely: teams don't move to
+Vitest because "it's newer" — they move because a large monorepo's Jest
+suite has a slow transform step (Babel or `ts-jest` re-parsing and
+re-transforming TypeScript on every run), and that shows up in both cold
+start and watch mode. Vitest reuses the exact same Vite pipeline the app
 already runs through in dev, so there's no separate transform
 configuration to maintain or to fall out of sync with the real build.
-Large orgs still on Jest generally aren't migrating for its own sake; the
-switch tends to happen opportunistically alongside a broader build-tool
-migration to Vite, since doing it standalone is real migration effort
-(mock API differences, config translation, subtle timer/module-mocking
-behavior differences) for a payoff that only clearly justifies itself once
-the suite is large enough to feel Jest's transform overhead.
+
+Large orgs still on Jest generally aren't migrating just for its own
+sake — the switch tends to happen alongside a broader move to Vite for
+the build itself, since doing it standalone is real work (different mock
+APIs, config translation, subtle differences in timer/module-mocking
+behavior). That work only clearly pays off once the suite is large enough
+to actually feel Jest's transform overhead.
 
 ### Testing Library and its guiding philosophy
 
 Testing Library's stated philosophy — *"the more your tests resemble the
 way your software is used, the more confidence they can give you"* —
-translates concretely into **query by role and accessible name, not by
-CSS class, test ID, or component internals**:
+translates into one concrete rule: **query by role and accessible name,
+not by CSS class, test ID, or component internals**:
 
 ```tsx
 // Anti-pattern — queries by implementation detail (a CSS class or
@@ -598,43 +631,44 @@ screen.getByRole("button", { name: "Submit order" });
 ```
 
 This matters *more* for a design system than for an application, for a
-specific, non-obvious reason: **a design system's actual consumers
-interact with the component through the same accessible-role/name
-interface a screen reader user does.** An app consuming `<Button>` from
-the design system doesn't know or care about the button's internal class
-names or DOM depth — it cares that it's a real `<button>` with a correct
-role and accessible name, because that's the contract the design system
-promises every consumer, and it's also literally the interface assistive
-technology uses to expose the button to a non-sighted user. A test suite
-that queries by role/label is therefore testing the *actual public API* of
-the component (its accessible contract) rather than an incidental
-implementation detail (which CSS class happens to be applied this week) —
-and a design system's public API is exactly what has to stay stable
-across refactors for consumers not to break. This is the same reasoning
-[Chapter 3](/chapters/component-architecture) applies to composition
-patterns: test the contract, not the implementation, because the contract
-is what a hundred downstream consumers actually depend on.
+specific reason: **a design system's actual consumers interact with the
+component through the same accessible-role/name interface a screen
+reader user does.** An app consuming `<Button>` from the design system
+doesn't know or care about the button's internal class names or DOM
+depth. It cares that it's a real `<button>` with a correct role and
+accessible name — that's the contract the design system promises every
+consumer, and it's also literally the interface assistive technology uses
+to expose the button to a non-sighted user.
+
+A test suite that queries by role/label is therefore testing the
+component's *actual public API* (its accessible contract), not an
+incidental implementation detail like which CSS class happens to be
+applied this week. A design system's public API is exactly what has to
+stay stable across refactors, or consumers break. This is the same
+reasoning [Chapter 3](/chapters/component-architecture) applies to
+composition patterns: test the contract, not the implementation, because
+the contract is what a hundred downstream consumers actually depend on.
 
 ## Advantages
 
-- **The pyramid shape matches the actual bug surface.** Heavy unit/
-  interaction/visual investment catches the regressions a design system
-  actually ships; minimal E2E avoids wasted effort on flows the library
-  doesn't own.
+- **The pyramid shape matches the actual bug surface.** Heavy unit,
+  interaction, and visual investment catches the regressions a design
+  system actually ships; minimal E2E avoids wasted effort on flows the
+  library doesn't own.
 - **Testing Library's role-based queries double as accessibility
   verification.** A passing test suite is partial evidence the component
   is operable by assistive technology, essentially for free.
 - **Fast feedback loop.** Unit, integration, interaction, and
   accessibility tests all run in `jsdom` without a browser, which keeps
-  the inner dev loop and CI both fast — visual regression and E2E, the
+  the inner dev loop and CI both fast. Visual regression and E2E, the
   two layers that need a real browser, are correspondingly the two run
-  least frequently.
+  least often.
 - **Layered coverage catches genuinely different bug classes.** Unit
   tests catch wrong output for given props; interaction tests catch
   sequence/timing/focus bugs; visual regression catches unintended
   cascading style changes; accessibility tests catch a mechanically
-  checkable subset of a11y regressions — no single layer subsumes the
-  others.
+  checkable subset of a11y regressions — no single layer covers what the
+  others do.
 
 ## Disadvantages
 
@@ -643,27 +677,26 @@ is what a hundred downstream consumers actually depend on.
   `jest-axe` report as "done" ship real accessibility gaps.
 - **Visual regression is inherently flaky without active maintenance.**
   Font loading and animation timing produce false positives that erode
-  trust in the gate if not actively mitigated.
-- **Snapshot testing is easy to misuse and hard to un-misuse.** Once a
-  team's culture normalizes blindly re-approving snapshot diffs, reversing
-  that habit is a cultural problem, not a tooling fix.
-- **Multiple test layers is real ongoing cost.** Five to seven distinct
-  test types per component is more infrastructure to maintain, more CI
-  time, and more places a flaky test can live than a single-layer
-  strategy — this cost only pays off at real component-library scale.
+  trust in the gate if not actively fixed.
+- **Snapshot testing is easy to misuse and hard to fix once misused.**
+  Once a team's culture normalizes blindly re-approving snapshot diffs,
+  reversing that habit is a cultural problem, not a tooling fix.
+- **Multiple test layers is a real ongoing cost.** Five to seven distinct
+  test types per component means more infrastructure to maintain, more CI
+  time, and more places a flaky test can hide than a single-layer
+  strategy — this only pays off at real component-library scale.
 - **A narrow E2E layer can mean cross-browser bugs slip through longer.**
-  Deliberately scoping E2E down trades some real-browser-fidelity
-  coverage for speed; a genuine cross-engine rendering bug might only
-  surface in the (less frequent) Playwright run rather than on every
-  commit.
+  Deliberately scoping E2E down trades away some real-browser coverage
+  for speed; a genuine cross-engine rendering bug might only surface in
+  the (less frequent) Playwright run instead of on every commit.
 
 ## Alternatives
 
 Testing *strategy* itself doesn't have interchangeable "alternatives" the
-way a styling engine does, but the tools within each layer do, and the
-comparison worth having explicit is **where a team draws the layer
-boundaries** — how much is pushed into unit vs. interaction vs. visual vs.
-E2E:
+way a styling engine does, but the tools within each layer do. What's
+worth comparing explicitly is **where a team draws the layer
+boundaries** — how much gets pushed into unit vs. interaction vs. visual
+vs. E2E:
 
 | Approach | What problem it solves | Performance | DX | Learning curve | Ecosystem | Maintenance burden | Enterprise suitability | When to choose | When NOT to choose |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -673,74 +706,83 @@ E2E:
 | E2E-heavy (app-pyramid applied unmodified) | Full-fidelity, real browser confidence | Slowest, most expensive CI | Poor — slow loop discourages writing tests at all | Low if already Playwright-fluent | Strong (Playwright) | High — E2E suites are notoriously expensive to keep green | Poor fit for a component library specifically | Rarely the right default for a design system | A design system, essentially always — this pyramid shape is mismatched to what the library actually owns |
 
 Large, mature design system orgs converge on the balanced pyramid model
-specifically because it's the only one of these that doesn't either waste
-CI budget (E2E-heavy) or leave a real bug class uncovered (unit-only,
-visual-only). Companies with heavy design/engineering review culture
-(Atlassian, Shopify) lean visibly further toward the visual-regression
-layer because their components ship fully styled and cascading token
-changes are a real, frequent risk; companies shipping unstyled primitives
-(Radix) lean further toward the accessibility/interaction layers because
-that's the entirety of what they own.
+because it's the only one of these that doesn't either waste CI budget
+(E2E-heavy) or leave a real bug class uncovered (unit-only, visual-only).
+Companies with a heavy design/engineering review culture (Atlassian,
+Shopify) lean visibly further toward the visual-regression layer, because
+their components ship fully styled and cascading token changes are a
+real, frequent risk. Companies shipping unstyled primitives (Radix) lean
+further toward the accessibility/interaction layers, because that's the
+entirety of what they own.
 
 ## Tradeoffs
 
 The central tradeoff across every layer here is **fidelity vs. speed**,
-repeated at each rung: `jsdom` is fast but doesn't paint, so it can't
-catch real rendering bugs; a real browser catches them but is slower and
-more expensive to run on every commit. The design-system-specific answer
-is not "maximize fidelity everywhere" but to spend the expensive, high-
-fidelity layers (visual regression, Playwright) exactly where cheap layers
-structurally cannot substitute — real paint, real cross-engine CSS
-differences — and to push everything else (props → output correctness,
-event sequences, ARIA attribute presence) down into the fast layers where
-speed doesn't cost any real coverage. Getting this allocation wrong in
-either direction is the actual risk: over-investing in slow, real-browser
-layers for things `jsdom` could catch just as well burns CI budget and
-developer patience for no extra signal; under-investing in visual/E2E for
-the specific bug classes only a real browser can catch (font rendering,
-cross-engine flexbox differences, actual paint-dependent contrast) leaves
-real regressions unguarded.
+repeated at each rung of the pyramid. `jsdom` is fast but doesn't paint,
+so it can't catch real rendering bugs; a real browser catches them but is
+slower and more expensive to run on every commit.
+
+The design-system-specific answer is not "maximize fidelity everywhere."
+It's to spend the expensive, high-fidelity layers (visual regression,
+Playwright) exactly where cheap layers structurally can't substitute —
+real paint, real cross-engine CSS differences — and push everything else
+(props → output correctness, event sequences, ARIA attribute presence)
+down into the fast layers, where speed doesn't cost any real coverage.
+Getting this allocation wrong in either direction is the real risk:
+over-investing in slow, real-browser layers for things `jsdom` could
+catch just as well burns CI budget and developer patience for no extra
+signal; under-investing in visual/E2E for the specific bug classes only a
+real browser can catch (font rendering, cross-engine flexbox differences,
+actual paint-dependent contrast) leaves real regressions unguarded.
 
 ## Performance Considerations
 
-Test suite performance in a design system repo compounds differently than
-in an app repo because component libraries tend to have very high test
-*count* relative to code volume — hundreds of small, focused unit tests
-per package is normal. `jsdom`'s per-test setup/teardown cost, multiplied
-across thousands of tests, becomes the dominant cost long before any
-individual test is slow; Vitest's parallelized worker pool and (for
-Vite-based projects) shared transform cache directly address this, which
-is the concrete performance argument for the Vitest migration discussed
-above at a scale beyond "it feels faster." Visual regression's cost scales
-with snapshot *count*, not test complexity — Chromatic's TurboSnap
-(mentioned in [Chapter 7](/chapters/storybook)) and Playwright's ability
-to scope screenshot tests to only the packages a
+Test suite performance in a design system repo compounds differently
+than in an app repo, because component libraries tend to have a very
+high test *count* relative to code volume — hundreds of small, focused
+unit tests per package is normal. `jsdom`'s per-test setup/teardown cost,
+multiplied across thousands of tests, becomes the dominant cost long
+before any individual test is slow. Vitest's parallelized worker pool
+and (for Vite-based projects) shared transform cache directly address
+this — the concrete performance argument for the Vitest migration
+discussed above, beyond just "it feels faster."
+
+Visual regression's cost scales with snapshot *count*, not test
+complexity. Chromatic's TurboSnap (mentioned in
+[Chapter 7](/chapters/storybook)) and Playwright's ability to scope
+screenshot tests to only the packages a
 [monorepo](/chapters/monorepo-architecture)'s dependency graph marks as
-affected are both direct responses to this. Accessibility tests
-(`jest-axe`) run axe-core's full rule set on every invocation by default;
-at high test counts, scoping the rule set to only the WCAG level actually
-targeted (commonly AA) rather than running every available rule keeps
-this layer from becoming a bottleneck without losing meaningful coverage.
+affected are both direct responses to this.
+
+Accessibility tests (`jest-axe`) run axe-core's full rule set on every
+invocation by default. At high test counts, scoping the rule set to only
+the WCAG level actually targeted (commonly AA) instead of running every
+available rule keeps this layer from becoming a bottleneck, without
+losing meaningful coverage.
 
 ## Scalability Considerations
 
 As a design system's component count and consumer count grow, three
-things scale sub-linearly without deliberate intervention. First, visual
-regression snapshot volume grows with both component count *and* story
-count per component, which is why affected-only scoping (running visual
-tests only for packages a change actually touches, via the dependency
-graph covered in [Chapter 9](/chapters/monorepo-architecture)) becomes
-necessary rather than optional past a few hundred components. Second,
-flaky test accumulation compounds — a 0.5% flake rate per test is
-invisible at 50 tests and a serious CI-reliability problem at 5,000,
-which argues for actively quarantining and fixing flaky tests rather than
-re-running until green, a habit that erodes trust in the whole suite the
-same way blindly accepted snapshot diffs do. Third, accessibility and
-interaction test authorship needs to scale with contributor count, not
-just component count — this is where documented conventions (a
-`.a11y.test.tsx` naming pattern, a required checklist in the PR template)
-matter more than tooling, tying back into the contribution-model concerns
-covered in [Chapter 11](/chapters/governance).
+things scale worse than expected unless a team steps in deliberately.
+
+First, visual regression snapshot volume grows with both component count
+*and* story count per component — which is why scoping visual tests only
+to packages a change actually touches, via the dependency graph covered
+in [Chapter 9](/chapters/monorepo-architecture), becomes necessary rather
+than optional past a few hundred components.
+
+Second, flaky test accumulation compounds. A 0.5% flake rate per test is
+invisible at 50 tests and a serious CI-reliability problem at 5,000. This
+is an argument for actively quarantining and fixing flaky tests rather
+than re-running until green — a habit that erodes trust in the whole
+suite, the same way blindly accepted snapshot diffs do.
+
+Third, accessibility and interaction test authorship needs to scale with
+contributor count, not just component count. This is where documented
+conventions (a `.a11y.test.tsx` naming pattern, a required checklist in
+the PR template) matter more than tooling — tying back into the
+contribution-model concerns covered in
+[Chapter 11](/chapters/governance).
 
 ## Common Mistakes
 
@@ -760,10 +802,10 @@ covered in [Chapter 11](/chapters/governance).
 </Callout>
 
 <Callout type="danger" title="Rubber-stamping snapshot or visual diffs under deadline pressure">
-  Both failure modes are the same root cause: a diff too large or too
-  frequent for a human to actually evaluate gets approved on reflex,
-  which silently converts a regression gate into a no-op while the CI
-  time and false confidence remain.
+  Both failure modes share the same root cause: a diff too large or too
+  frequent for a human to actually evaluate gets approved on reflex. That
+  silently turns a regression gate into a no-op, while the CI time and
+  false confidence remain.
 </Callout>
 
 <Callout type="danger" title="Querying by test-id or CSS class instead of role/label">
@@ -1023,33 +1065,38 @@ covered in [Chapter 11](/chapters/governance).
 
 A design system's testing pyramid is shaped by what a component actually
 owns — rendering, behavior, and accessibility, not business logic or
-routing — which pushes most of the real coverage into unit, integration,
+routing. That pushes most of the real coverage into unit, integration,
 interaction, accessibility, and visual regression testing, with E2E
 narrowed to cross-browser rendering checks rather than the user-flow
-testing it does in an application repo. Unit tests should assert on
-behavior and the accessibility contract (roles, ARIA attributes,
-disabled/loading states), not implementation details or full-markup
-snapshots. Integration tests are necessary specifically for compound
-components, where correctness only exists at the composed level.
-Interaction tests, via `userEvent` or Storybook play functions, catch a
-distinct bug class — event sequence, timing, and focus-order bugs — that
-props-driven unit tests structurally cannot reach. Accessibility tooling
-(`jest-axe`, axe-core) is genuinely valuable but caps out around a third
-of real WCAG issues by design, since the rest require human judgment.
+testing it does in an application repo.
+
+Unit tests should check behavior and the accessibility contract (roles,
+ARIA attributes, disabled/loading states), not implementation details or
+full-markup snapshots. Integration tests are necessary specifically for
+compound components, where correctness only exists at the composed
+level. Interaction tests, via `userEvent` or Storybook play functions,
+catch a distinct bug class — event sequence, timing, and focus-order
+bugs — that props-driven unit tests structurally cannot reach.
+Accessibility tooling (`jest-axe`, axe-core) is genuinely valuable but
+caps out around a third of real WCAG issues by design, since the rest
+requires human judgment.
+
 Visual regression's mechanical process (screenshot, diff against
-baseline) is sound, but its practical failure mode — flaky diffs from font
-and animation timing — has to be actively engineered around or the whole
-gate loses the team's trust. Snapshot testing is a legitimate tool for
-small, stable, meaningful output, and an anti-pattern when applied to full
-component markup, where it produces unreadable diffs that get rubber-
-stamped rather than evaluated. Vitest's advantage over Jest is concrete
-and mechanical — reusing the project's real Vite transform pipeline
-instead of a separate Babel-based one — and the migration is worth making
-once that transform overhead becomes a measured pain point at scale.
-Testing Library's role/label query philosophy matters more here than in
-an app because a design system's actual public contract with its
-consumers *is* the accessible role/name interface — the same interface a
-screen reader exposes to an assistive-technology user.
+baseline) is sound, but its practical failure mode — flaky diffs from
+font and animation timing — has to be actively engineered around, or the
+whole gate loses the team's trust. Snapshot testing is a legitimate tool
+for small, stable, meaningful output, and an anti-pattern when applied to
+full component markup, where it produces unreadable diffs that get
+rubber-stamped instead of evaluated.
+
+Vitest's advantage over Jest is concrete and mechanical — reusing the
+project's real Vite transform pipeline instead of a separate Babel-based
+one — and the migration is worth making once that transform overhead
+becomes a measured pain point at scale. Testing Library's role/label
+query philosophy matters more here than in an app, because a design
+system's actual public contract with its consumers *is* the accessible
+role/name interface — the same interface a screen reader exposes to an
+assistive-technology user.
 
 **Key takeaways**
 
