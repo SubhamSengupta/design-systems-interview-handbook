@@ -283,6 +283,25 @@ export const CHAPTERS: ChapterMeta[] = [
       "Cross-functional collaboration scenarios",
     ],
   },
+  {
+    slug: "design-technologist-round",
+    order: 16,
+    part: "VI. Interview Prep",
+    title: "16. The Design Round: Interviewing With Designers & Design Technologists",
+    shortTitle: "Design Round Prep",
+    description:
+      "What a design-system round with designers and design technologists actually tests, how it differs from an EM/IC round, Figma vocabulary you need, and worked example answers.",
+    topics: [
+      "What a Design Technologist is (Atlassian-style hybrid role)",
+      "What this round evaluates that an engineering round doesn't",
+      "Likely round formats: portfolio walkthrough, Figma-to-code discussion, live component API design, disagreement scenarios",
+      "Figma vocabulary an engineer should know cold: variants, auto-layout, components/instances, Figma Variables",
+      "How to talk about past design collaboration (STAR-style, but design-flavored)",
+      "How to push back on an infeasible design without sounding difficult",
+      "Worked example: given a rough design, narrate your implementation + accessibility + edge-case thinking out loud",
+      "Questions to ask them",
+    ],
+  },
 ];
 
 export function getChapter(slug: string): ChapterMeta | undefined {

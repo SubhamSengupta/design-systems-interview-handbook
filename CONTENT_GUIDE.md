@@ -34,7 +34,9 @@ export const metadata = {
 ```
 
 The `#` H1 immediately after should restate the chapter's `title` from
-`chapters.ts` verbatim. Do not add any other content before the H1.
+`chapters.ts` verbatim. Do not add any other content before the H1 —
+except the `## Quick Glance` section described in §4, which comes
+immediately after the H1.
 
 ## 3. Components available in every MDX file (no import needed)
 
@@ -116,6 +118,14 @@ Every chapter MUST use these H2 sections, in this order (H2 = `##`). Use
 H3 (`###`) for sub-topics within a section — e.g. one H3 per topic in the
 chapter's `topics` list where it makes sense to break things out.
 
+0. `## Quick Glance` — comes right after the H1, before `## Definition`.
+   This is the pre-interview skim section: a bulleted cheat-sheet, NOT
+   prose. 6–10 short bullets, each one fact or one line, covering: what
+   this chapter is about in one line, the 3–5 things most likely to come
+   up in an interview, and any "if they ask X, say Y" one-liners. Someone
+   re-reading the chapter 10 minutes before an interview should be able to
+   read only this section and still sound prepared. No paragraphs, no
+   sub-bullets more than one level deep, plain words only (see §7).
 1. `## Definition`
 2. `## Problem Statement`
 3. `## Why Does This Exist?`
@@ -198,6 +208,28 @@ the brief, don't skip it.
   blog post — go deep. Err toward the higher end for chapters with many
   `topics` entries (e.g. Chapter 3, 6, 9).
 
+### Plain English (required)
+
+This is a study guide someone reads under time pressure, often the night
+before an interview — depth is required, but density for its own sake is
+not. Apply all of these:
+
+- Short sentences. One idea per sentence. If a sentence needs a comma to
+  hold two ideas, it's almost always two sentences.
+- Plain, common words over fancy ones: use "use" not "utilize", "help"
+  not "facilitate", "show" not "demonstrate", "start" not "commence".
+  There's no bonus for a bigger word that means the same thing.
+- The first time a jargon term or acronym appears in a chapter, define it
+  in the same sentence or the next one, in plain words — don't assume the
+  reader already knows it even if it was defined in an earlier chapter.
+- Prefer concrete examples over abstract description. "A Button used in
+  4,000 places" beats "components used at scale."
+- Break up any paragraph longer than ~4 sentences. If a paragraph is
+  really a list of things, make it a bulleted list instead of a paragraph.
+- Still keep everything technically precise — "plain English" means
+  simpler sentences and words, not vaguer or less accurate content. Never
+  cut a real technical detail just to shorten a sentence.
+
 ## 8. Cross-references
 
 Link to other chapters with a normal relative markdown link:
@@ -223,7 +255,10 @@ link to Chapter 2) — this is what makes it feel like one handbook.
 
 Re-read your `topics` list from `chapters.ts` and confirm every single
 topic is covered somewhere in the chapter body. Re-read §4 and confirm all
-19 sections are present with the exact `##` headings listed (verbatim
-text, since some tooling may key off them later). Confirm at least one
-`<Mermaid>` diagram exists in `## Architecture`. Confirm interview/manager
-question counts meet the minimums in §4.
+20 sections are present with the exact `##` headings listed (verbatim
+text, since some tooling may key off them later), including `## Quick
+Glance` right after the H1. Confirm at least one `<Mermaid>` diagram
+exists in `## Architecture`. Confirm interview/manager question counts
+meet the minimums in §4. Read your own prose back and confirm it follows
+§7's Plain English rules — no sentence should make a reader stop and
+re-read it.
