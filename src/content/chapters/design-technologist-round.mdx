@@ -11,7 +11,7 @@ export const metadata = {
 - **Confirmed format for this kind of round:** a round-table conversation with designers, taking turns asking questions — not a live coding or design-review exercise. You'll also get time to ask them questions.
 - Expect a mix of questions across three buckets: **UI/UX principles**, **design/dev collaboration**, and **systems thinking**. See the dedicated sections below for each.
 - The goal from their side is simple: are you comfortable talking about design, and will you be pleasant and effective to work with. It's a fit/communication check, not a test with a pass/fail rubric on a specific answer.
-- The panel is designers (possibly including a **Design Technologist** — a hybrid design/code role, see Definition below).
+- **Know your own role vs. the panel's role.** You're interviewing as a **Senior Frontend Developer on the design system team** — not for a Design Technologist position. The panel is Design Technologists (and/or designers) — a hybrid design/code role, see Definition below. Don't try to sound like you already do their exact job; sound like someone they'd trust to build the system well and partner with closely.
 - The #1 thing they're listening for: do you talk about **tradeoffs and reasons**, or do you just say "yes" or "no" to what design asks for?
 - Never say a design is "impossible." Say what it costs and offer an alternative that keeps the design's intent.
 - Bring one real story of disagreeing with a designer and how it ended well. Structure it: situation → what you pushed back on → why → what you proposed instead → outcome.
@@ -25,6 +25,10 @@ export const metadata = {
 A **design round** (sometimes called a "cross-functional round" or "design partnership round") is an interview where the people judging you are not other engineers — they're **designers** or **Design Technologists**. They're checking one thing above all else: can they hand you a half-finished idea and trust you to turn it into something good, without either blindly doing whatever they sketched or bulldozing it with "that's not how React works"?
 
 A **Design Technologist** is a real, specific job title, not a fuzzy buzzword. It's a hybrid role — part designer, part front-end engineer — that owns the bridge between a Figma file and working code. Atlassian describes theirs as people who "turn creativity into code": they prototype ideas too rough for a full engineering ticket, keep the design system's code and its Figma library in sync, and speak both languages fluently enough to catch problems before they become bugs or design debt.
+
+<Callout type="info" title="Your role vs. their role — don't mix these up">
+  If you're interviewing as a **Senior Frontend Developer on a design system team**, you are not applying to be a Design Technologist. The panel being Design Technologists just means the people judging you *think and evaluate through that hybrid lens* — they care a lot about collaboration, UX literacy, and systems thinking, on top of your engineering skill. You don't need to claim you already do their job. You need to show you'd be a strong, trustworthy partner for people who do.
+</Callout>
 
 ## Problem Statement
 
@@ -49,7 +53,7 @@ Three concrete reasons companies add this round for design-system roles specific
 
 **Bad collaboration is expensive and hard to see coming.** A design system component gets used hundreds or thousands of times. A wrong assumption baked in during a rushed handoff — no dark mode plan, no way to make the button smaller, hard-coded English-only text — doesn't show up as a bug report next week. It shows up eight months later as a painful, breaking migration. Companies would rather catch "will this person make that mistake" in an interview than in production.
 
-**Design Technologists specifically need to be evaluated by designers.** If a Design Technologist's real day job includes pairing with designers on prototypes and keeping Figma and code in sync, an engineering-only panel literally cannot tell whether you're good at that job. They have to be in the room.
+**An engineering-only panel can't judge design fluency.** As a frontend engineer on this team, you'll work side by side with Design Technologists and designers every week — reviewing Figma files together, debating a component's API, negotiating spacing that doesn't match a token. An engineering-only panel has no way to tell if you're good at that specific kind of conversation. So the people who *do* that with you daily are put in the room to judge it directly.
 
 ## Historical Context
 
@@ -63,7 +67,7 @@ Understanding where this round came from helps you understand what it's testing.
 
 ## How It Works Internally
 
-What does a Design Technologist actually do, day to day? Knowing this tells you what the interviewers value, because they're often picturing you doing this job:
+What does a Design Technologist actually do, day to day? You're not applying for this job — but knowing what it involves tells you what your interviewers personally value and listen for, since it's the lens they naturally evaluate everyone through, including a frontend engineer joining the same team:
 
 - **Prototyping ideas that are too rough for a ticket.** A designer has a half-formed idea for a new interaction. Instead of a static mockup, the Design Technologist builds a quick, real, clickable prototype in code — because some ideas (animation timing, drag behavior, how a component feels at the edges) can't be judged from a static image.
 - **Keeping the design system's code and its Figma library in sync.** When a token or component changes in code, the Figma file needs to match, and vice versa — otherwise designers start designing with a component that no longer looks like what ships.
@@ -71,7 +75,7 @@ What does a Design Technologist actually do, day to day? Knowing this tells you 
 - **Championing adoption.** Helping other product teams actually use the system correctly instead of copy-pasting and diverging from it.
 
 <Callout type="tip" title="Why this matters for you">
-  If you don't have a Design Technologist background, that's fine — most candidates for this round don't. But if you can describe your past work using this same shape (prototyped something rough, kept two sources of truth in sync, translated a technical constraint into a design-friendly explanation), you'll sound like you already know the job.
+  You don't need a Design Technologist background — most Senior Frontend candidates for this round don't have one, and that's fine. But if you can describe your own past work using this same shape (prototyped something rough to answer a question, kept two sources of truth in sync, translated a technical constraint into a design-friendly explanation), it'll land well with this specific panel because it's the shape of work they respect and do themselves.
 </Callout>
 
 ### UI/UX principles worth having sharp
@@ -103,25 +107,27 @@ Concretely, systems thinking shows up as:
 
 ## Architecture
 
-Here's the collaboration loop this round is checking that you can operate inside — and where things typically break down if you can't:
+Here's the collaboration loop this round is checking that you can operate inside — and where things typically break down if you can't. Note that **you and the Design Technologist are peers on the same team**, both connected to the designer and the system, not one standing in for the other:
 
 ```mermaid
 flowchart LR
-  D[Designer] -->|Figma file, intent| DT[You / Design Technologist]
-  DT -->|"Here's what this costs, here's an option"| D
-  DT -->|Implements + documents| Sys[Design System]
+  D[Designer] -->|Figma file, intent| DT[Design Technologist]
+  D -->|Figma file, intent| You[You — Senior Frontend Engineer]
+  DT <-->|Shared context, token sync| You
+  You -->|"Here's what this costs, here's an option"| D
+  You -->|Implements + documents| Sys[Design System]
   Sys -->|Tokens + components| Prod[Product Teams]
-  Prod -->|Real usage feedback| DT
-  DT -->|Feeds back constraints| D
+  Prod -->|Real usage feedback| You
+  You -->|Feeds back constraints| D
 ```
 
 Every arrow in that diagram is a place a bad collaborator goes silent — builds without pushing back, ships without documenting, ignores feedback from product teams. Every arrow is also a place an interviewer can ask "tell me about a time this happened to you," so it's worth having a real story for at least two or three of these arrows.
 
 ## Real-World Example
 
-Atlassian's own description of the Design Technologist role is worth reading before this interview, because it's a real company defining exactly the role you may be evaluated by or against. Their framing: Design Technologists exist because "the space between design and engineering" was where good ideas were dying — either too vague for engineering to estimate, or already locked into a rigid spec before anyone tested whether the interaction actually felt good. Their Design Technologists sit inside design critiques *and* engineering planning, and their output is as often a working prototype as it is a Jira ticket.
+Atlassian's own description of the Design Technologist role is worth reading before this interview, because it's a real company defining exactly the role of the people who will be interviewing you. Their framing: Design Technologists exist because "the space between design and engineering" was where good ideas were dying — either too vague for engineering to estimate, or already locked into a rigid spec before anyone tested whether the interaction actually felt good. Their Design Technologists sit inside design critiques *and* engineering planning, and their output is as often a working prototype as it is a Jira ticket.
 
-That's the bar: not "I can code what design gives me," but "I can be in the room early enough to shape what design gives me."
+You're not being hired to do that job yourself. But knowing it tells you what this panel values in a teammate: not "I can code what design gives me," but "I care enough to be in the room early and help shape what design gives me" — even if your own day-to-day work leans more toward the harder engineering (architecture, performance, testing) than toward prototyping.
 
 ## Implementation Example
 
@@ -293,7 +299,7 @@ The fix: lead with your conclusion, then back it up if they want more. *"I'd pus
 </InterviewQuestion>
 
 <InterviewQuestion q="Tell me about a prototype or quick proof-of-concept you built to answer a design question that a static mockup couldn't answer.">
-  **What the interviewer is testing:** Direct alignment with the Design Technologist function — using code as a design exploration tool, not just a production tool.
+  **What the interviewer is testing:** Whether you value and are willing to use code as a design exploration tool, not just a production tool — this is the instinct the Design Technologists on the panel care about most, even for a frontend engineer who won't do this as their main job.
 
   **Poor answer:** Has no example, or describes only building final, polished features.
 
@@ -356,14 +362,14 @@ The fix: lead with your conclusion, then back it up if they want more. *"I'd pus
 
 ## Summary
 
-A design round with designers and Design Technologists is checking a different skill than a coding round: not "can you build it," but "can we hand you something unfinished and trust the result." The Design Technologist role — a real, named hybrid job most visibly documented at companies like Atlassian — is a useful mental model for what "good" looks like here, because it's literally the job of prototyping fast, keeping design and code in sync, and translating between the two disciplines honestly in both directions.
+A design round with designers and Design Technologists is checking a different skill than a coding round: not "can you build it," but "can we hand you something unfinished and trust the result." You're interviewing as a Senior Frontend Developer on the design system team, not for a Design Technologist role — but the panel evaluates through that hybrid lens, so understanding what Design Technologists value (prototyping fast, keeping design and code in sync, honest two-way translation) tells you what "good" looks like to them in a teammate.
 
 Prepare by having real stories ready (not improvised), learning a small amount of Figma vocabulary so you don't freeze, and practicing the intent → API → states → accessibility → visuals narration order for any live "build this" exercise. Above all, never say something is simply impossible, and never simply agree with everything — both read as untrustworthy in exactly the way this round is built to catch.
 
 **Key takeaways**
 
 - This round tests collaboration and judgment, not code — narrate your reasoning constantly.
-- Know what a Design Technologist actually does: prototyping, Figma/code sync, two-way translation.
+- You're being evaluated *by* Design Technologists as a frontend engineer, not evaluated *for* their role — don't try to sound like you already do their job, sound like a great partner for people who do.
 - Never say "impossible" — say the cost, then offer an alternative that keeps the design's intent.
 - For any "build this" exercise: intent → API/props → states → accessibility → visuals, in that order.
 - Bring 2–3 real disagreement stories with an honest outcome, not a clean "I was right" story.
